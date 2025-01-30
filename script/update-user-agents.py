@@ -1,18 +1,21 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
+
 import argparse
 import re
 import sys
+from collections.abc import Mapping, Sequence
 from os import getenv
 from pathlib import Path
-from typing import Any, Mapping, Sequence, Union
+from typing import Any
 
 import requests
 
 
 ROOT = Path(__file__).parents[1].resolve()
 
-MAPPING: Mapping[str, Sequence[Union[str, int]]] = {
+MAPPING: Mapping[str, Sequence[str | int]] = {
     "ANDROID": ("android", "standard", "sample_user_agents", "chrome", 0),
     "CHROME": ("chrome", "windows", "sample_user_agents", "standard", 0),
     "CHROME_OS": ("chrome-os", "standard", "sample_user_agents", "x86_64", 0),
@@ -37,9 +40,9 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--file",
         metavar="FILE",
-        default=ROOT / "src" / "streamlink" / "plugin" / "api" / "useragents.py",
+        default=ROOT / "src" / "streamlink" / "session" / "http_useragents.py",
         type=Path,
-        help="The user agents module file\nDefault: $GITROOT/src/streamlink/plugin/api/useragents.py",
+        help="The user agents module file\nDefault: $GITROOT/src/streamlink/session/http_useragents.py",
     )
 
     return parser.parse_args()
@@ -65,8 +68,8 @@ def main(api_key: str, file: Path):
         result: dict = data and data.get("result") or {}
         if result.get("code") != "success":
             raise ValueError(result.get("message") or "Missing version_data in JSON response")
-    except requests.exceptions.RequestException:
-        raise ValueError("Error while querying API or parsing JSON response")
+    except requests.exceptions.RequestException as err:
+        raise ValueError("Error while querying API or parsing JSON response") from err
 
     version_data: dict = data.get("version_data") or {}
     user_agents = {}
@@ -75,10 +78,10 @@ def main(api_key: str, file: Path):
         for item in seq:
             try:
                 obj = obj[item]
-            except KeyError:
-                raise ValueError(f"Invalid key: {item} ({seq})")
+            except LookupError as err:
+                raise ValueError(f"Invalid key: {item} ({seq})") from err
 
-        if type(obj) is not str:
+        if not isinstance(obj, str):
             raise ValueError(f"Invalid result: {obj!r} ({seq})")
 
         user_agents[browser] = obj

@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import sys
 from getpass import getpass
 from json import dumps
-from typing import Any, Dict, List, Optional, TextIO, Union
+from typing import Any, TextIO
 
 from streamlink.user_input import UserInputRequester
 from streamlink_cli.utils import JSONEncoder
@@ -11,16 +13,17 @@ class ConsoleUserInputRequester(UserInputRequester):
     """
     Request input from the user on the console using the standard ask/askpass methods
     """
+
     def __init__(self, console):
         self.console = console
 
     def ask(self, prompt: str) -> str:
-        if not sys.stdin.isatty():
+        if not sys.stdin or not sys.stdin.isatty():
             raise OSError("no TTY available")
         return self.console.ask(f"{prompt.strip()}: ")
 
     def ask_password(self, prompt: str) -> str:
-        if not sys.stdin.isatty():
+        if not sys.stdin or not sys.stdin.isatty():
             raise OSError("no TTY available")
         return self.console.askpass(f"{prompt.strip()}: ")
 
@@ -30,8 +33,8 @@ class ConsoleOutput:
         self.json = json
         self.output = output
 
-    def ask(self, prompt: str) -> Optional[str]:
-        if not sys.stdin.isatty():
+    def ask(self, prompt: str) -> str | None:
+        if not sys.stdin or not sys.stdin.isatty():
             return None
 
         self.output.write(prompt)
@@ -42,8 +45,8 @@ class ConsoleOutput:
         except Exception:
             return None
 
-    def askpass(self, prompt: str) -> Optional[str]:
-        if not sys.stdin.isatty():
+    def askpass(self, prompt: str) -> str | None:
+        if not sys.stdin or not sys.stdin.isatty():
             return None
 
         return getpass(prompt, self.output)
@@ -57,7 +60,7 @@ class ConsoleOutput:
         if not self.json:
             return
 
-        out: Union[List, Dict]
+        out: list | dict
         if objs and isinstance(objs[0], list):
             out = []
             for obj in objs:
@@ -79,19 +82,11 @@ class ConsoleOutput:
                 out.update(**obj)
             out.update(**keywords)
 
-        msg = dumps(out, cls=JSONEncoder, indent=2)
+        # don't escape Unicode characters outside the ASCII range if the output encoding is UTF-8
+        ensure_ascii = self.output.encoding != "utf-8"
+
+        msg = dumps(out, cls=JSONEncoder, ensure_ascii=ensure_ascii, indent=2)
         self.output.write(f"{msg}\n")
-
-        if type(out) is dict and out.get("error"):
-            sys.exit(1)
-
-    def exit(self, msg: str) -> None:
-        if self.json:
-            self.msg_json(error=msg)
-        else:
-            self.msg(f"error: {msg}")
-
-        sys.exit(1)
 
 
 __all__ = ["ConsoleOutput", "ConsoleUserInputRequester"]

@@ -5,24 +5,17 @@ from tests.plugins import PluginCanHandleUrl
 class TestPluginCanHandleUrlCeskatelevize(PluginCanHandleUrl):
     __plugin__ = Ceskatelevize
 
-    should_match = [
-        "https://www.ceskatelevize.cz/zive/ct1/",
-        "https://www.ceskatelevize.cz/zive/ct2/",
-        "https://www.ceskatelevize.cz/zive/ct24/",
-        "https://www.ceskatelevize.cz/zive/ct26/",
-        "https://www.ceskatelevize.cz/zive/ct27/",
-        "https://www.ceskatelevize.cz/zive/ct28/",
-        "https://www.ceskatelevize.cz/zive/ct31/",
-        "https://www.ceskatelevize.cz/zive/ct32/",
-        "https://www.ceskatelevize.cz/zive/decko/",
-        "https://www.ceskatelevize.cz/zive/sport/",
+    should_match_groups = [
+        (("channel", "https://ct24.ceskatelevize.cz/"), {"channel": "ct24"}),
+        (("channel", "https://decko.ceskatelevize.cz/"), {"channel": "decko"}),
+        (("sport", "https://sport.ceskatelevize.cz/"), {}),
+        (("default", "https://ceskatelevize.cz/zive/ct1"), {}),
+        (("default", "https://ceskatelevize.cz/zive/ct2"), {}),
+        (("default", "https://ceskatelevize.cz/zive/art"), {}),
+        (("default", "https://ceskatelevize.cz/zive/ch-28"), {}),
     ]
 
     should_not_match = [
-        "http://decko.ceskatelevize.cz/zive/",
-        "http://www.ceskatelevize.cz/art/zive/",
-        "http://www.ceskatelevize.cz/ct1/zive/",
-        "http://www.ceskatelevize.cz/ct2/zive/",
-        "http://www.ceskatelevize.cz/ct24/",
-        "http://www.ceskatelevize.cz/sport/zive-vysilani/",
+        "https://ceskatelevize.cz/",
+        "https://www.ceskatelevize.cz/zive/",
     ]

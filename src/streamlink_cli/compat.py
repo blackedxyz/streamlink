@@ -1,28 +1,18 @@
 import sys
-from pathlib import Path
-from typing import BinaryIO, TYPE_CHECKING
+from os import devnull
+from typing import BinaryIO
+
 
 try:
-    import importlib.metadata as importlib_metadata  # type: ignore[import]  # noqa: F401
-except ImportError:
-    import importlib_metadata  # type: ignore[import]  # noqa: F401
+    stdout: BinaryIO = sys.stdout.buffer
+except AttributeError:  # pragma: no cover
+    from atexit import register as _atexit_register
 
-
-stdout: BinaryIO = sys.stdout.buffer
-
-
-if TYPE_CHECKING:  # pragma: no cover
-    _BasePath = Path
-else:
-    _BasePath = type(Path())
-
-
-class DeprecatedPath(_BasePath):
-    pass
+    stdout = open(devnull, "wb")
+    _atexit_register(stdout.close)
+    del _atexit_register
 
 
 __all__ = [
-    "importlib_metadata",
     "stdout",
-    "DeprecatedPath",
 ]

@@ -1,11 +1,12 @@
 """
-$description Global live streaming and video on-demand hosting platform.
+$description Global live-streaming and video on-demand hosting platform.
 $url ott.streann.com
 $url centroecuador.ec
 $url columnaestilos.com
 $url evtv.online/noticias-de-venezuela
 $url telecuracao.com
 $type live, vod
+$metadata title
 """
 
 import base64
@@ -21,39 +22,50 @@ from streamlink.stream.hls import HLSStream
 from streamlink.utils.crypto import decrypt_openssl
 from streamlink.utils.parse import parse_qsd
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(
-    r"https?://ott\.streann\.com/s(?:treaming|-secure)/player\.html"
-))
-@pluginmatcher(re.compile(r"""
-    https?://(?:www\.)?(?:
-        centroecuador\.ec
-        |
-        columnaestilos\.com
-        |
-        crc\.cr/estaciones/
-        |
-        evtv\.online/noticias-de-venezuela/
-        |
-        telecuracao\.com
-    )
-""", re.VERBOSE))
+@pluginmatcher(
+    name="centroecuador",
+    pattern=re.compile(r"https?://(?:www\.)?centroecuador\.ec"),
+)
+@pluginmatcher(
+    name="columnaestilos",
+    pattern=re.compile(r"https?://(?:www\.)?columnaestilos\.com"),
+)
+@pluginmatcher(
+    name="crc",
+    pattern=re.compile(r"https?://(?:www\.)?crc\.cr/estaciones/"),
+)
+@pluginmatcher(
+    name="evtv",
+    pattern=re.compile(r"https?://(?:www\.)?evtv\.online/noticias-de-venezuela/"),
+)
+@pluginmatcher(
+    name="telecuracao",
+    pattern=re.compile(r"https?://(?:www\.)?telecuracao\.com"),
+)
+@pluginmatcher(
+    name="streann",
+    pattern=re.compile(r"https?://ott\.streann\.com/s(?:treaming|-secure)/player\.html"),
+)
 @pluginargument(
     "url",
     metavar="URL",
-    type=str,
     help="Source URL where the iframe is located, only required for direct URLs of ott.streann.com",
 )
 class Streann(Plugin):
     base_url = "https://ott.streann.com"
     get_time_url = base_url + "/web/services/public/get-server-time"
     token_url = base_url + "/loadbalancer/services/web-players/{playerId}/token/{type}/{dataId}/{deviceId}"
-    stream_url = base_url + "/loadbalancer/services/web-players/{type}s-reseller-secure/{dataId}/{playerId}" \
-                            "/{token}/{resellerId}/playlist.m3u8?date={time}&device-type=web&device-name=web" \
-                            "&device-os=web&device-id={deviceId}"
-    passphrase_re = re.compile(r'''CryptoJS\.AES\.decrypt\(.*?,\s*(['"])(?P<passphrase>(?:(?!\1).)*)\1\s*?\);''')
+    stream_url = (
+        base_url
+        + "/loadbalancer/services/web-players/{type}s-reseller-secure/{dataId}/{playerId}"
+        + "/{token}/{resellerId}/playlist.m3u8?date={time}&device-type=web&device-name=web"
+        + "&device-os=web&device-id={deviceId}"
+    )
+    passphrase_re = re.compile(r"""CryptoJS\.AES\.decrypt\(.*?,\s*(['"])(?P<passphrase>(?:(?!\1).)*)\1\s*?\);""")
 
     _device_id = None
     _domain = None
@@ -66,7 +78,8 @@ class Streann(Plugin):
         """
         if self._device_id is None:
             self._device_id = "".join(
-                random.choice("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") for _ in range(50))
+                random.choice("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") for _ in range(50)
+            )
         return self._device_id
 
     @property
@@ -83,47 +96,55 @@ class Streann(Plugin):
 
     def get_token(self, **config):
         log.debug("get_token")
-        pdata = dict(arg1=base64.b64encode(self._domain.encode("utf8")),
-                     arg2=base64.b64encode(self.time.encode("utf8")))
+        pdata = dict(
+            arg1=base64.b64encode(self._domain.encode("utf8")),
+            arg2=base64.b64encode(self.time.encode("utf8")),
+        )
 
         headers = {
             "Referer": self.url,
             "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/x-www-form-urlencoded"
+            "Content-Type": "application/x-www-form-urlencoded",
         }
 
         res = self.session.http.post(
             self.token_url.format(deviceId=self.device_id, **config),
             data=pdata,
-            headers=headers
+            headers=headers,
         )
 
         if res.status_code == 204:
             log.error(f"self._domain might be invalid - {self._domain}")
             return
 
-        data = self.session.http.json(res, schema=validate.Schema({
-            "token": str,
-            validate.optional("name"): str,
-            validate.optional("webPlayer"): {
-                validate.optional("id"): str,
+        data = self.session.http.json(
+            res,
+            schema=validate.Schema({
+                "token": str,
                 validate.optional("name"): str,
-                validate.optional("type"): str,
-                validate.optional("allowedDomains"): [str],
-            },
-        }))
+                validate.optional("webPlayer"): {
+                    validate.optional("id"): str,
+                    validate.optional("name"): str,
+                    validate.optional("type"): str,
+                    validate.optional("allowedDomains"): [str],
+                },
+            }),
+        )
         log.trace(f"{data!r}")
         self.title = data.get("name")
         return data["token"]
 
     def _get_streams(self):
-        if not self.matches[0]:
+        if not self.matches["streann"]:
             self._domain = urlparse(self.url).netloc
-            iframes = self.session.http.get(self.url, schema=validate.Schema(
-                validate.parse_html(),
-                validate.xml_findall(".//iframe[@src]"),
-                validate.filter(lambda elem: urlparse(elem.attrib.get("src")).netloc == "ott.streann.com")
-            ))
+            iframes = self.session.http.get(
+                self.url,
+                schema=validate.Schema(
+                    validate.parse_html(),
+                    validate.xml_findall(".//iframe[@src]"),
+                    validate.filter(lambda elem: urlparse(elem.attrib.get("src")).netloc == "ott.streann.com"),
+                ),
+            )
             if not iframes:
                 log.error("Could not find 'ott.streann.com' iframe")
                 return
@@ -150,14 +171,9 @@ class Streann(Plugin):
             token = self.get_token(**config)
             if not token:
                 return
-            hls_url = self.stream_url.format(time=self.time,
-                                             deviceId=self.device_id,
-                                             token=token,
-                                             **config)
+            hls_url = self.stream_url.format(time=self.time, deviceId=self.device_id, token=token, **config)
             log.debug("URL={0}".format(hls_url))
-            return HLSStream.parse_variant_playlist(self.session,
-                                                    hls_url,
-                                                    acceptable_status=(200, 403, 404, 500))
+            return HLSStream.parse_variant_playlist(self.session, hls_url, acceptable_status=(200, 403, 404, 500))
 
 
 __plugin__ = Streann

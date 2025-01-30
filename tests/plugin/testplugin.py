@@ -2,9 +2,7 @@ import re
 from io import BytesIO
 
 from streamlink import NoStreamsError
-from streamlink.options import Options
-from streamlink.plugin import pluginargument, pluginmatcher
-from streamlink.plugins import Plugin
+from streamlink.plugin import Plugin, pluginargument, pluginmatcher
 from streamlink.stream.hls import HLSStream
 from streamlink.stream.http import HTTPStream
 from streamlink.stream.stream import Stream
@@ -14,12 +12,12 @@ class TestStream(Stream):
     __shortname__ = "test"
 
     def open(self):
-        return BytesIO(b'x' * 8192 * 2)
+        return BytesIO(b"x" * 8192 * 2)
 
 
-@pluginmatcher(re.compile(
-    r"https?://test\.se"
-))
+@pluginmatcher(
+    re.compile(r"https?://test\.se"),
+)
 @pluginargument(
     "bool",
     action="store_true",
@@ -30,10 +28,6 @@ class TestStream(Stream):
     metavar="PASSWORD",
 )
 class TestPlugin(Plugin):
-    options = Options({
-        "a_option": "default"
-    })
-
     id = "test-id-1234-5678"
     author = "Tѥst Āuƭhǿr"
     category = None
@@ -44,14 +38,18 @@ class TestPlugin(Plugin):
             return
 
         if "UnsortableStreamNames" in self.url:
+
             def gen():
-                for i in range(3):
+                for _ in range(3):
                     yield "vod", HTTPStream(self.session, "http://test.se/stream")
 
             return gen()
 
         if "NoStreamsError" in self.url:
-            raise NoStreamsError(self.url)
+            raise NoStreamsError
+
+        if "fromoptions" in self.url:
+            return {"fromoptions": HTTPStream(self.session, self.options.get("streamurl"))}
 
         streams = {}
         streams["test"] = TestStream(self.session)
@@ -69,7 +67,7 @@ class TestPlugin(Plugin):
 
         streams["480p"] = [
             HTTPStream(self.session, "http://test.se/stream"),
-            HLSStream(self.session, "http://test.se/playlist.m3u8")
+            HLSStream(self.session, "http://test.se/playlist.m3u8"),
         ]
 
         return streams

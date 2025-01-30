@@ -9,11 +9,12 @@ insert_final_newline = true
 max_line_length = 128
 trim_trailing_whitespace = true
 
-[*.{cfg,svg,toml,yml}]
+[*.{cfg,mpd,svg,toml,xml,yml}]
 indent_size = 2
 
 [*.{md,markdown}]
 trim_trailing_whitespace = false
+max_line_length = off
 
 [docs/Makefile]
 indent_size = 8

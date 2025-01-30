@@ -1,18 +1,27 @@
-pip>=9
-pytest
+# setup
+pip >=21.0.0
+setuptools >=64.0.0  # required for being able to run editable installs
+versioningit >=2.0.0,<4  # required for being able to run editable installs
+
+# tests
+pytest >=8.0.0
+pytest-trio
+requests-mock
+freezegun >=1.5.0
+
+# code-coverage
 pytest-cov
 coverage[toml]
-requests-mock
-freezegun>=1.0.0
-flake8
-flake8-import-order
-flake8-pyi
-shtab
-versioningit >=2.0.0, <3
 
-mypy
+# code-linting / code-formatting
+ruff ==0.9.4
+
+# typing
+mypy[faster-cache] ==1.14.1
+typing-extensions >=4.0.0
 lxml-stubs
+trio-typing
 types-freezegun
 types-requests
+types-setuptools
 types-urllib3
-typing_extensions

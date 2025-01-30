@@ -11,13 +11,12 @@ import logging
 import re
 import time
 
-from Crypto.Cipher import PKCS1_v1_5
-from Crypto.PublicKey import RSA
-
 from streamlink.exceptions import FatalPluginError
 from streamlink.plugin import Plugin, pluginargument, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.dash import DASHStream
+from streamlink.utils.crypto import RSA, PKCS1_v1_5
+
 
 log = logging.getLogger(__name__)
 
@@ -26,12 +25,12 @@ class SteamLoginFailed(Exception):
     pass
 
 
-@pluginmatcher(re.compile(
-    r"https?://steamcommunity\.com/broadcast/watch/(\d+)"
-))
-@pluginmatcher(re.compile(
-    r"https?://steam\.tv/(\w+)"
-))
+@pluginmatcher(
+    re.compile(r"https?://steamcommunity\.com/broadcast/watch/(\d+)"),
+)
+@pluginmatcher(
+    re.compile(r"https?://steam\.tv/(\w+)"),
+)
 @pluginargument(
     "email",
     requires=["password"],
@@ -75,9 +74,9 @@ class SteamBroadcastPlugin(Plugin):
                     "publickey_mod": validate.all(str, validate.transform(lambda x: int(x, 16))),
                     "success": True,
                     "timestamp": str,
-                    "token_gid": str
-                }
-            )
+                    "token_gid": str,
+                },
+            ),
         )
 
         rsa = RSA.construct((rsadata["publickey_mod"], rsadata["publickey_exp"]))
@@ -115,9 +114,9 @@ class SteamBroadcastPlugin(Plugin):
                     validate.optional("emailsteamid"): str,
                     validate.optional("login_complete"): bool,
                     validate.optional("captcha_needed"): bool,
-                    validate.optional("captcha_gid"): validate.any(str, int)
-                }
-            )
+                    validate.optional("captcha_gid"): validate.any(str, int),
+                },
+            ),
         )
 
         if resp.get("login_complete"):
@@ -136,7 +135,7 @@ class SteamBroadcastPlugin(Plugin):
                 if not captcha_text:
                     return False
             else:
-                # If the user must enter the code that was emailed to them
+                # Whether the user must enter the code that was emailed to them
                 if resp.get("emailauth_needed"):
                     if emailauth:
                         raise SteamLoginFailed("Email auth key error")
@@ -147,7 +146,7 @@ class SteamBroadcastPlugin(Plugin):
                     if not emailauth:
                         return False
 
-                # If the user must enter a two factor auth code
+                # Whether the user must enter a two-factor auth code
                 if resp.get("requires_twofactor"):
                     try:
                         twofactorcode = self.input_ask("Two factor auth code required")
@@ -166,7 +165,7 @@ class SteamBroadcastPlugin(Plugin):
                 emailsteamid=resp.get("emailsteamid", ""),
                 captcha_text=captcha_text,
                 captchagid=captchagid,
-                twofactorcode=twofactorcode
+                twofactorcode=twofactorcode,
             )
 
         log.error("Something went wrong while logging in to Steam")
@@ -180,30 +179,32 @@ class SteamBroadcastPlugin(Plugin):
                 broadcastid=0,
                 steamid=steamid,
                 viewertoken=viewertoken,
-                sessionid=sessionid
+                sessionid=sessionid,
             ),
             schema=validate.Schema(
                 validate.parse_json(),
                 {
-                    "success": validate.any("ready", "unavailable", "waiting", "waiting_to_start", "waiting_for_start"),
-                    "retry": int,
-                    "broadcastid": validate.any(str, int),
+                    "success": str,
                     validate.optional("url"): validate.url(),
-                    validate.optional("viewertoken"): str
-                }
-            )
+                    validate.optional("cdn_auth_url_parameters"): validate.any(str, None),
+                },
+                validate.union_get("success", "url", "cdn_auth_url_parameters"),
+            ),
         )
 
     def _find_steamid(self, url):
-        return self.session.http.get(url, schema=validate.Schema(
-            validate.parse_html(),
-            validate.xml_xpath_string(".//div[@id='webui_config']/@data-broadcast"),
-            validate.none_or_all(
-                validate.parse_json(),
-                {"steamid": str},
-                validate.get("steamid"),
+        return self.session.http.get(
+            url,
+            schema=validate.Schema(
+                validate.parse_html(),
+                validate.xml_xpath_string(".//div[@id='webui_config']/@data-broadcast"),
+                validate.none_or_all(
+                    validate.parse_json(),
+                    {"steamid": str},
+                    validate.get("steamid"),
+                ),
             ),
-        ))
+        )
 
     def _get_streams(self):
         self.session.http.headers["User-Agent"] = f"streamlink/{self.session.version}"
@@ -231,20 +232,17 @@ class SteamBroadcastPlugin(Plugin):
         res = self.session.http.get(self.url)  # get the page to set some cookies
         sessionid = res.cookies.get("sessionid")
 
-        streamdata = None
-        while streamdata is None or streamdata["success"] in ("waiting", "waiting_for_start"):
-            streamdata = self._get_broadcast_stream(steamid, sessionid=sessionid)
+        success, url, cdn_auth = self._get_broadcast_stream(steamid, sessionid=sessionid)
+        if success != "ready" or not url:
+            log.error("This stream is currently unavailable")
+            return
 
-            if streamdata["success"] == "ready":
-                return DASHStream.parse_manifest(self.session, streamdata["url"])
+        # CDN auth data is only required at certain times of the day, and it makes
+        # segment requests fail if missing (the DASH manifest still works regardless).
+        # Remove leading ampersand and pass the params as a string, to avoid URL quoting.
+        params = re.sub(r"^&", "", cdn_auth) if cdn_auth else None
 
-            if streamdata["success"] == "unavailable":
-                log.error("This stream is currently unavailable")
-                return
-
-            r = streamdata["retry"] / 1000.0
-            log.info(f"Waiting for stream, will retry again in {r:.1f} seconds...")
-            time.sleep(r)
+        return DASHStream.parse_manifest(self.session, url, params=params)
 
 
 __plugin__ = SteamBroadcastPlugin

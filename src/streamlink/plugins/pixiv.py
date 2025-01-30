@@ -7,17 +7,18 @@ $type live
 import logging
 import re
 
-from streamlink.exceptions import FatalPluginError, NoStreamsError, PluginError
+from streamlink.exceptions import FatalPluginError, NoStreamsError
 from streamlink.plugin import Plugin, pluginargument, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(
-    r"https?://sketch\.pixiv\.net/@?(?P<user>[^/]+)"
-))
+@pluginmatcher(
+    re.compile(r"https?://sketch\.pixiv\.net/@?(?P<user>[^/]+)"),
+)
 @pluginargument(
     "sessionid",
     requires=["devicetoken"],
@@ -42,38 +43,37 @@ log = logging.getLogger(__name__)
     help="Select a co-host stream instead of the owner stream.",
 )
 class Pixiv(Plugin):
-    _post_key_re = re.compile(
-        r"""name=["']post_key["']\svalue=["'](?P<data>[^"']+)["']""")
+    _post_key_re = re.compile(r"""name=["']post_key["']\svalue=["'](?P<data>[^"']+)["']""")
 
     _user_dict_schema = validate.Schema(
         {
             "user": {
-                "unique_name": validate.text,
-                "name": validate.text
+                "unique_name": str,
+                "name": str,
             },
             validate.optional("hls_movie"): {
-                "url": validate.text
-            }
-        }
+                "url": str,
+            },
+        },
     )
 
     _user_schema = validate.Schema(
         {
             "owner": _user_dict_schema,
             "performers": [
-                validate.any(_user_dict_schema, None)
-            ]
-        }
+                validate.any(_user_dict_schema, None),
+            ],
+        },
     )
 
     _data_lives_schema = validate.Schema(
         {
             "data": {
-                "lives": [_user_schema]
-            }
+                "lives": [_user_schema],
+            },
         },
         validate.get("data"),
-        validate.get("lives")
+        validate.get("lives"),
     )
 
     api_lives = "https://sketch.pixiv.net/api/lives.json"
@@ -82,15 +82,14 @@ class Pixiv(Plugin):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._authed = (self.session.http.cookies.get("PHPSESSID")
-                        and self.session.http.cookies.get("device_token"))
+        self._authed = self.session.http.cookies.get("PHPSESSID") and self.session.http.cookies.get("device_token")
         self.session.http.headers.update({"Referer": self.url})
 
     def _login_using_session_id_and_device_token(self, session_id, device_token):
         self.session.http.get(self.login_url_get)
 
-        self.session.http.cookies.set('PHPSESSID', session_id, domain='.pixiv.net', path='/')
-        self.session.http.cookies.set('device_token', device_token, domain='.pixiv.net', path='/')
+        self.session.http.cookies.set("PHPSESSID", session_id, domain=".pixiv.net", path="/")
+        self.session.http.cookies.set("device_token", device_token, domain=".pixiv.net", path="/")
 
         self.save_cookies()
         log.info("Successfully set sessionId and deviceToken")
@@ -111,7 +110,7 @@ class Pixiv(Plugin):
             if item["owner"]["user"]["unique_name"] == self.match.group("user"):
                 return item
 
-        raise NoStreamsError(self.url)
+        raise NoStreamsError
 
     def _get_streams(self):
         login_session_id = self.get_option("sessionid")
@@ -132,24 +131,19 @@ class Pixiv(Plugin):
         log.trace("{0!r}".format(streamer_data))
         if performers:
             co_hosts = [(p["user"]["unique_name"], p["user"]["name"]) for p in performers]
-            log.info("Available hosts: {0}".format(", ".join(
-                ["{0} ({1})".format(k, v) for k, v in co_hosts])))
+            log.info("Available hosts: {0}".format(", ".join(["{0} ({1})".format(k, v) for k, v in co_hosts])))
 
             # control if the host from --pixiv-performer is valid,
             # if not let the User select a different host
             if self.get_option("performer") and self.get_option("performer") not in [v[0] for v in co_hosts]:
-
                 # print the owner as 0
-                log.info("0 - {0} ({1})".format(
-                    streamer_data["owner"]["user"]["unique_name"],
-                    streamer_data["owner"]["user"]["name"]))
+                log.info(f"0 - {streamer_data['owner']['user']['unique_name']} ({streamer_data['owner']['user']['name']})")
                 # print all other performer
                 for i, item in enumerate(co_hosts, start=1):
                     log.info("{0} - {1} ({2})".format(i, item[0], item[1]))
 
                 try:
-                    number = int(self.input_ask(
-                        "Enter the number you'd like to watch").split(" ")[0])
+                    number = int(self.input_ask("Enter the number you'd like to watch").split(" ")[0])
                     if number == 0:
                         # default stream
                         self.set_option("performer", None)
@@ -157,9 +151,11 @@ class Pixiv(Plugin):
                         # other co-hosts
                         self.set_option("performer", co_hosts[number - 1][0])
                 except FatalPluginError:
-                    raise PluginError("Selected performer is invalid.")
+                    log.error("Selected performer is invalid.")
+                    return
                 except (IndexError, ValueError, TypeError):
-                    raise PluginError("Input is invalid")
+                    log.error("Input is invalid")
+                    return
 
         # ignore the owner stream, if a performer is selected
         # or use it when there are no other performers

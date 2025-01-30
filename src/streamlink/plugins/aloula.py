@@ -2,6 +2,10 @@
 $description Live TV channels and video on-demand service from the SBA, a Saudi, state-owned broadcaster.
 $url aloula.sa
 $type live, vod
+$metadata id
+$metadata author
+$metadata category
+$metadata title
 """
 
 import logging
@@ -11,33 +15,36 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(r"""
-    https?://(?:www\.)?aloula\.sa/(?:\w{2}/)?
-    (?:
-        live/(?P<live_slug>[^/?&]+)
-    |
-        episode/(?P<vod_id>\d+)
-    )
-""", re.VERBOSE))
+@pluginmatcher(
+    name="live",
+    pattern=re.compile(r"https?://(?:www\.)?aloula\.sa/(?:\w{2}/)?live/(?P<live_slug>[^/?&]+)"),
+)
+@pluginmatcher(
+    name="vod",
+    pattern=re.compile(r"https?://(?:www\.)?aloula\.sa/(?:\w{2}/)?episode/(?P<vod_id>\d+)"),
+)
 class Aloula(Plugin):
     def get_live(self, live_slug):
         live_data = self.session.http.get(
             "https://aloula.faulio.com/api/v1/channels",
             schema=validate.Schema(
                 validate.parse_json(),
-                [{
-                    "id": int,
-                    "url": str,
-                    "title": str,
-                    "has_live": bool,
-                    "has_vod": bool,
-                    "streams": {
-                        "hls": validate.url(),
+                [
+                    {
+                        "id": int,
+                        "url": str,
+                        "title": str,
+                        "has_live": bool,
+                        "has_vod": bool,
+                        "streams": {
+                            "hls": validate.url(),
+                        },
                     },
-                }],
+                ],
                 validate.filter(lambda k: k["url"] == live_slug),
             ),
         )
@@ -64,13 +71,17 @@ class Aloula(Plugin):
                 validate.parse_json(),
                 validate.any(
                     validate.all(
-                        {"blocks": [{
-                            "id": str,
-                            "program_title": str,
-                            "title": str,
-                            "season_number": int,
-                            "episode": int,
-                        }]},
+                        {
+                            "blocks": [
+                                {
+                                    "id": str,
+                                    "program_title": str,
+                                    "title": str,
+                                    "season_number": int,
+                                    "episode": int,
+                                },
+                            ],
+                        },
                         validate.get(("blocks", 0)),
                     ),
                     {"cms_error": str, "message": str},
@@ -101,13 +112,15 @@ class Aloula(Plugin):
         return HLSStream.parse_variant_playlist(self.session, hls_url)
 
     def _get_streams(self):
-        live_slug = self.match.group("live_slug")
-        vod_id = self.match.group("vod_id")
+        self.session.http.headers.update({
+            "Origin": "https://www.aloula.sa",
+            "Referer": "https://www.aloula.sa/",
+        })
 
-        if live_slug:
-            return self.get_live(live_slug)
-        elif vod_id:
-            return self.get_vod(vod_id)
+        if self.matches["live"]:
+            return self.get_live(self.match["live_slug"])
+        else:
+            return self.get_vod(self.match["vod_id"])
 
 
 __plugin__ = Aloula

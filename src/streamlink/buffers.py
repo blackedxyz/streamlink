@@ -27,6 +27,7 @@ class Buffer:
         self.current_chunk = None
         self.closed = False
         self.length = 0
+        self.written_once = False
 
     def _iterate_chunks(self, size):
         bytes_left = size
@@ -52,6 +53,7 @@ class Buffer:
             data = bytes(data)  # Copy so that original buffer may be reused
             self.chunks.append(data)
             self.length += len(data)
+            self.written_once = True
 
     def read(self, size=-1):
         if size < 0 or size > self.length:
@@ -125,7 +127,7 @@ class RingBuffer(Buffer):
                 write_len = min(self.free, data_left)
                 written = data_total - data_left
 
-                Buffer.write(self, data[written:written + write_len])
+                Buffer.write(self, data[written : written + write_len])
                 data_left -= write_len
 
                 self._check_events()
@@ -137,10 +139,10 @@ class RingBuffer(Buffer):
             self._check_events()
 
     def wait_free(self, timeout=None):
-        self.event_free.wait(timeout)
+        return self.event_free.wait(timeout)
 
     def wait_used(self, timeout=None):
-        self.event_used.wait(timeout)
+        return self.event_used.wait(timeout)
 
     def close(self):
         Buffer.close(self)

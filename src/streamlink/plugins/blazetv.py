@@ -2,6 +2,10 @@
 $description British live TV channel and video on-demand service from Blaze, owned by A&E Networks UK.
 $url blaze.tv
 $type live, vod
+$metadata id
+$metadata author
+$metadata category
+$metadata title
 $region United Kingdom
 """
 
@@ -12,12 +16,13 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(
-    r"https?://(?:watch\.)?blaze\.tv/(?:(?P<is_live>live)|watch/replay/\d+)"
-))
+@pluginmatcher(
+    re.compile(r"https?://(?:watch\.)?blaze\.tv/(?:(?P<is_live>live)|watch/replay/\d+)"),
+)
 class BlazeTV(Plugin):
     @staticmethod
     def _get_live_uvid(parsed_html):

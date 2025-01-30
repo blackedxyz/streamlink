@@ -2,6 +2,10 @@
 $description Lithuanian live TV channels from LNK Group, including 2TV, BTV, Info TV, LNK and TV1.
 $url lnk.lt
 $type live
+$metadata id
+$metadata author
+$metadata category
+$metadata title
 $region Lithuania
 """
 
@@ -12,12 +16,13 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(
-    r"https?://(?:www\.)?lnk\.lt/tiesiogiai(?:#(?P<channel>[a-z0-9]+))?"
-))
+@pluginmatcher(
+    re.compile(r"https?://(?:www\.)?lnk\.lt/tiesiogiai(?:#(?P<channel>[a-z0-9]+))?"),
+)
 class LNK(Plugin):
     API_URL = "https://lnk.lt/api/video/video-config/{0}"
 
@@ -40,18 +45,20 @@ class LNK(Plugin):
             self.API_URL.format(self.id),
             schema=validate.Schema(
                 validate.parse_json(),
-                {"videoInfo": {
-                    "channel": str,
-                    "genre": validate.any(None, str),
-                    "title": validate.any(None, str),
-                    "videoUrl": validate.any(
-                        "",
-                        validate.url(path=validate.endswith(".m3u8"))
-                    )
-                }},
+                {
+                    "videoInfo": {
+                        "channel": str,
+                        "genre": validate.any(None, str),
+                        "title": validate.any(None, str),
+                        "videoUrl": validate.any(
+                            "",
+                            validate.url(path=validate.endswith(".m3u8")),
+                        ),
+                    },
+                },
                 validate.get("videoInfo"),
-                validate.union_get("channel", "genre", "title", "videoUrl")
-            )
+                validate.union_get("channel", "genre", "title", "videoUrl"),
+            ),
         )
         if not hls_url:
             log.error("The stream is not available in your region")

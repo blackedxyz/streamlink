@@ -2,26 +2,27 @@
 $description Live and on-demand video service from World Wrestling Entertainment, Inc.
 $url network.wwe.com
 $type live, vod
+$metadata id
+$metadata title
 $account Required
 """
 
-import json
 import logging
 import re
-from functools import lru_cache
-from urllib.parse import parse_qsl, urlparse
 
-from streamlink.plugin import Plugin, PluginError, pluginargument, pluginmatcher
-from streamlink.plugin.api import useragents
+from streamlink.plugin import Plugin, pluginargument, pluginmatcher
+from streamlink.plugin.api import validate
+from streamlink.stream.ffmpegmux import MuxedStream
 from streamlink.stream.hls import HLSStream
-from streamlink.utils.times import seconds_to_hhmmss
+from streamlink.stream.http import HTTPStream
+
 
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(
-    r"https?://watch\.wwe\.com/(channel)?"
-))
+@pluginmatcher(
+    re.compile(r"https?://network\.wwe\.com/(video|live)/(?P<stream_id>\d+)"),
+)
 @pluginargument(
     "email",
     required=True,
@@ -37,127 +38,135 @@ log = logging.getLogger(__name__)
     help="A WWE Network account password to use with --wwenetwork-email.",
 )
 class WWENetwork(Plugin):
-    site_config_re = re.compile(r'''">window.__data = (\{.*?\})</script>''')
-    stream_url = "https://dce-frontoffice.imggaming.com/api/v2/stream/{id}"
-    live_url = "https://dce-frontoffice.imggaming.com/api/v2/event/live"
-    login_url = "https://dce-frontoffice.imggaming.com/api/v2/login"
-    page_config_url = "https://cdn.watch.wwe.com/api/page"
-    API_KEY = "cca51ea0-7837-40df-a055-75eb6347b2e7"
+    _API_LOGIN_URL = "https://dce-frontoffice.imggaming.com/api/v2/login"
+    _API_URLS = {
+        "video": "https://dce-frontoffice.imggaming.com/api/v4/vod/{0}",
+        "live": "https://dce-frontoffice.imggaming.com/api/v4/event/{0}",
+    }
 
-    customer_id = 16
+    _API_HEADERS = {
+        "x-api-key": "857a1e5d-e35e-4fdf-805b-a87b6f8364bf",
+        "realm": "dce.wwe",
+    }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.session.http.headers.update({"User-Agent": useragents.CHROME})
-        self.auth_token = None
+    def _login(self, email, password):
+        success, data = self.session.http.post(
+            self._API_LOGIN_URL,
+            json={"id": email, "secret": password},
+            headers=self._API_HEADERS,
+            raise_for_status=False,
+            schema=validate.Schema(
+                validate.parse_json(),
+                validate.any(
+                    validate.all(
+                        {"messages": [str]},
+                        validate.get(("messages", 0)),
+                        validate.transform(lambda data: (False, data)),
+                    ),
+                    validate.all(
+                        {"authorisationToken": str},
+                        validate.get("authorisationToken"),
+                        validate.transform(lambda data: (True, data)),
+                    ),
+                ),
+            ),
+        )
 
-    def get_title(self):
-        return self.item_config['title']
-
-    def request(self, method, url, **kwargs):
-        headers = kwargs.pop("headers", {})
-        headers.update({"x-api-key": self.API_KEY,
-                        "Origin": "https://watch.wwe.com",
-                        "Referer": "https://watch.wwe.com/signin",
-                        "Accept": "application/json",
-                        "Realm": "dce.wwe"})
-        if self.auth_token:
-            headers["Authorization"] = "Bearer {0}".format(self.auth_token)
-
-        kwargs["raise_for_status"] = False
-        log.debug("API request: {0} {1}".format(method, url))
-        res = self.session.http.request(method, url, headers=headers, **kwargs)
-        data = self.session.http.json(res)
-
-        if "status" in data and data["status"] != 200:
-            log.debug("API request failed: {0}:{1} ({2})".format(
-                data["status"],
-                data.get("code"),
-                "; ".join(data.get("messages", []))
-            ))
-        return data
-
-    def login(self, email, password):
-        log.debug("Attempting login as {0}".format(email))
-        # sets some required cookies to login
-        data = self.request('POST', self.login_url,
-                            data=json.dumps({"id": email, "secret": password}),
-                            headers={"Content-Type": "application/json"})
-        if "authorisationToken" in data:
-            self.auth_token = data["authorisationToken"]
-
-        return self.auth_token
-
-    @property  # type: ignore
-    @lru_cache(maxsize=128)
-    def item_config(self):
-        log.debug("Loading page config")
-        p = urlparse(self.url)
-        res = self.session.http.get(self.page_config_url,
-                                    params=dict(device="web_browser",
-                                                ff="idp,ldp",
-                                                item_detail_expand="all",
-                                                lang="en-US",
-                                                list_page_size="1",
-                                                max_list_prefetch="1",
-                                                path=p.path,
-                                                segments="es",
-                                                sub="Registered",
-                                                text_entry_format="html"))
-        data = self.session.http.json(res)
-        return data["item"]
-
-    def _get_media_info(self, content_id):
-        """
-        Get the info about the content, based on the ID
-        :param content_id: contentId for the video
-        :return:
-        """
-        info = self.request('GET', self.stream_url.format(id=content_id))
-        return self.request('GET', info.get("playerUrlCallback"))
-
-    def _get_video_id(self):
-        #  check the page to find the contentId
-        log.debug("Searching for content ID")
-        try:
-            if self.item_config['type'] == "channel":
-                return self._get_live_id()
-            else:
-                return "vod/{id}".format(id=self.item_config['customFields']['DiceVideoId'])
-        except KeyError:
-            log.error("Could not find video ID")
+        if not success:
+            log.error(data)
             return
 
-    def _get_live_id(self):
-        log.debug("Loading live event")
-        res = self.request('GET', self.live_url)
-        for event in res.get('events', []):
-            return "event/{sportId}/{propertyId}/{tournamentId}/{id}".format(**event)
+        return data
+
+    def _get_streams_content(self, content_type, content_id, token):
+        success, data = self.session.http.get(
+            self._API_URLS.get(content_type).format(content_id),
+            acceptable_status=(200, 401, 404),
+            params={"includePlaybackDetails": "URL"},
+            headers={"Authorization": f"Bearer {token}", **self._API_HEADERS},
+            schema=validate.Schema(
+                validate.parse_json(),
+                validate.any(
+                    validate.all(
+                        {"messages": [str]},
+                        validate.get(("messages", 0)),
+                        validate.transform(lambda message: (False, message)),
+                    ),
+                    validate.all(
+                        {
+                            "accessLevel": str,
+                            validate.optional("id"): int,
+                            validate.optional("title"): str,
+                            validate.optional("playerUrlCallback"): validate.any(None, validate.url()),
+                        },
+                        validate.union_get(
+                            "accessLevel",
+                            "playerUrlCallback",
+                            "id",
+                            "title",
+                        ),
+                        validate.transform(lambda data: (True, data)),
+                    ),
+                ),
+            ),
+        )
+
+        if not success:
+            log.error(data)
+            return
+
+        access, playback_url, self.id, self.title = data
+
+        if access != "GRANTED":
+            log.error("Paid subscription required for this video")
+            return
+
+        if not playback_url:
+            log.error("Failed to get playerUrlCallback from response")
+            return
+
+        playback_schema = validate.Schema(
+            {
+                "url": validate.url(),
+                validate.optional("subtitles"): validate.none_or_all(
+                    [{"language": str, "format": str, "url": validate.url()}],
+                    validate.filter(lambda s: s["format"] == "srt"),
+                ),
+            },
+            validate.union_get("url", "subtitles"),
+        )
+
+        playback_streams = self.session.http.get(
+            playback_url,
+            schema=validate.Schema(
+                validate.parse_json(),
+                {
+                    validate.optional("hls"): validate.any(
+                        validate.all(
+                            validate.list(playback_schema),
+                            validate.get(0),
+                        ),
+                        playback_schema,
+                    ),
+                },
+            ),
+        )
+
+        if playback_stream := playback_streams.get("hls"):
+            url, subtitles = playback_stream
+
+            if streams := HLSStream.parse_variant_playlist(self.session, url).items():
+                if subtitles and self.session.get_option("mux-subtitles"):
+                    substreams = {s["language"]: HTTPStream(self.session, s["url"]) for s in subtitles}
+
+                    for quality, stream in streams:
+                        yield quality, MuxedStream(self.session, stream, subtitles=substreams)
+                else:
+                    yield from streams
 
     def _get_streams(self):
-        if not self.login(self.get_option("email"), self.get_option("password")):
-            raise PluginError("Login failed")
-
-        try:
-            start_point = int(float(dict(parse_qsl(urlparse(self.url).query)).get("startPoint", 0.0)))
-            if start_point > 0:
-                log.info("Stream will start at {0}".format(seconds_to_hhmmss(start_point)))
-        except ValueError:
-            start_point = 0
-
-        content_id = self._get_video_id()
-
-        if content_id:
-            log.debug("Found content ID: {0}".format(content_id))
-            info = self._get_media_info(content_id)
-            if info.get("hlsUrl"):
-                yield from HLSStream.parse_variant_playlist(
-                    self.session,
-                    info["hlsUrl"],
-                    start_offset=start_point
-                ).items()
-            else:
-                log.error("Could not find the HLS URL")
+        if token := self._login(self.get_option("email"), self.get_option("password")):
+            return self._get_streams_content(*self.match.groups(), token)
 
 
 __plugin__ = WWENetwork

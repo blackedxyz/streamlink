@@ -30,24 +30,24 @@ the ``auth-token`` cookie, if it exists:
 
 Copy the resulting string consisting of 30 alphanumerical characters without any quotations.
 
-The final ``Authentication`` header which will identify your account while requesting a streaming access token can then be set
+The final ``Authorization`` header which will identify your account while requesting a streaming access token can then be set
 via Streamlink's :option:`--http-header` or :option:`--twitch-api-header` CLI arguments. The former will set the header on any
 HTTP request made by Streamlink, even HLS Streams, while the latter will only do that on Twitch API requests, which is what
 should be done when authenticating and which is the reason why this CLI argument was added.
 
-The value of the ``Authentication`` header must be in the format of ``OAuth YOUR_TOKEN``. Notice the space character in the
+The value of the ``Authorization`` header must be in the format of ``OAuth YOUR_TOKEN``. Notice the space character in the
 argument value, which requires quotation on command line shells:
 
 .. code-block:: console
 
-    $ streamlink "--twitch-api-header=Authentication=OAuth abcdefghijklmnopqrstuvwxyz0123" twitch.tv/CHANNEL best
+    $ streamlink "--twitch-api-header=Authorization=OAuth abcdefghijklmnopqrstuvwxyz0123" twitch.tv/CHANNEL best
 
 The entire argument can optionally be added to Streamlink's (Twitch plugin specific)
 :ref:`config file <cli/config:Plugin specific configuration file>`, which :ref:`doesn't require quotes <cli/config:Syntax>`:
 
 .. code-block:: text
 
-    twitch-api-header=Authentication=OAuth abcdefghijklmnopqrstuvwxyz0123
+    twitch-api-header=Authorization=OAuth abcdefghijklmnopqrstuvwxyz0123
 
 
 .. _restrictive changes: https://github.com/streamlink/streamlink/issues/2680#issuecomment-557605851
@@ -80,9 +80,35 @@ segments from Twitch's HLS streams and pauses the stream output until regular co
 logic has seen several iterations since then, with the latest big overhaul in
 :ref:`Streamlink 1.7.0 in 2020 <changelog:streamlink 1.7.0 (2020-10-18)>`.
 
-**In addition to that**, special API request headers can be set via :option:`--twitch-api-header` that can prevent ads from
-being embedded into the stream, either :ref:`authentication data <cli/plugins/twitch:Authentication>` or other data discovered
-by the community.
+**In addition to that**, special API request headers can be set via :option:`--twitch-api-header` or special API request
+parameters can be set via :option:`--twitch-access-token-param` that can prevent ads from being embedded into the stream,
+either :ref:`authentication data <cli/plugins/twitch:Authentication>` or other data discovered by the community.
+
+
+Client-integrity token
+----------------------
+
+In 2022, Twitch added client-integrity tokens to their web player when getting streaming access tokens. These client-integrity
+tokens are calculated using sophisticated JavaScript code which is infeasible to re-implement, as it not only involves
+obfuscated code that's much harder to reverse engineer and to extract data from, but also a custom JavaScript virtual machine
+implementation where bytecode gets interpreted which is encoded prior to that using randomization patterns. The interpreted
+bytecode performs various checks of the user's web browser and its features, and then determines whether the client is legit
+or not. The goal is to prevent bots and third party applications from accessing streams.
+
+Client-integrity tokens were treated as an optional request parameter when getting streaming access tokens.
+This changed on 2023-05-31 when Twitch made them a requirement, and it broke Streamlink's Twitch plugin (#5370).
+
+Since the only sensible solution for Streamlink to calculate client-integrity tokens was using a web browser, a new
+implementation was needed which could automate that. So in ``6.0.0`` the
+:ref:`streamlink.webbrowser <api/webbrowser:Webbrowser>` API was implemented, which requires a Chromium-based web browser being
+installed on the user's system. See the :option:`--webbrowser` and related CLI arguments for more details.
+
+However, a couple of days after Twitch made these changes, they reverted the requirement again, but in order for Streamlink
+to be prepared for such requirements to be turned on again, the webbrowser API was added nevertheless. The decision was made
+to only use the webbrowser API when getting an access token fails, so launching a web browser unnecessarily could be avoided,
+even though it would run invisibly in "headless mode". Should client-integrity tokens be made a requirement again, then
+Streamlink will cache the generated token in the plugin cache after launching the web browser once. This cache can be cleared
+using the :option:`--twitch-purge-client-integrity` option.
 
 
 Low latency streaming

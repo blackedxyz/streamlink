@@ -1,4 +1,3 @@
-import unittest
 from unittest.mock import ANY, MagicMock
 
 from streamlink import Streamlink
@@ -53,18 +52,16 @@ class TestPluginCanHandleUrlUStreamTV(PluginCanHandleUrl):
     ]
 
 
-class TestPluginUStreamTV(unittest.TestCase):
-    def test_arguments(self):
-        from streamlink_cli.main import setup_plugin_args
-        session = Streamlink()
+class TestPluginUStreamTV:
+    def test_arguments(self, session: Streamlink):
+        from streamlink_cli.main import setup_plugin_args  # noqa: PLC0415
+
         parser = MagicMock()
         plugins = parser.add_argument_group("Plugin Options")
         group = parser.add_argument_group("UStreamTV", parent=plugins)
 
-        session.plugins = {
-            'ustreamtv': UStreamTV
-        }
+        session.plugins["ustreamtv"] = UStreamTV
 
         setup_plugin_args(session, parser)
 
-        group.add_argument.assert_called_with('--ustream-password', metavar="PASSWORD", help=ANY)
+        group.add_argument.assert_called_with("--ustream-password", metavar="PASSWORD", help=ANY)

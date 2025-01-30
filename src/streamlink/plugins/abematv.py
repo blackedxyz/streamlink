@@ -15,7 +15,6 @@ import uuid
 from base64 import urlsafe_b64encode
 from binascii import unhexlify
 
-from Crypto.Cipher import AES
 from requests import Response
 from requests.adapters import BaseAdapter
 
@@ -23,14 +22,16 @@ from streamlink.exceptions import NoStreamsError
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import useragents, validate
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWriter
+from streamlink.utils.crypto import AES
 from streamlink.utils.url import update_qsd
+
 
 log = logging.getLogger(__name__)
 
 
 class AbemaTVHLSStreamWriter(HLSStreamWriter):
-    def should_filter_sequence(self, sequence):
-        return "/tsad/" in sequence.segment.uri or super().should_filter_sequence(sequence)
+    def should_filter_segment(self, segment):
+        return "/tsad/" in segment.uri or super().should_filter_segment(segment)
 
 
 class AbemaTVHLSStreamReader(HLSStreamReader):
@@ -42,9 +43,9 @@ class AbemaTVHLSStream(HLSStream):
 
 
 class AbemaTVLicenseAdapter(BaseAdapter):
-    '''
+    """
     Handling abematv-license:// protocol to get real video key_data.
-    '''
+    """
 
     STRTABLE = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -54,10 +55,9 @@ class AbemaTVLicenseAdapter(BaseAdapter):
 
     _LICENSE_API = "https://license.abema.io/abematv-hls"
 
-    _MEDIATOKEN_SCHEMA = validate.Schema({"token": validate.text})
+    _MEDIATOKEN_SCHEMA = validate.Schema({"token": str})
 
-    _LICENSE_SCHEMA = validate.Schema({"k": validate.text,
-                                       "cid": validate.text})
+    _LICENSE_SCHEMA = validate.Schema({"k": str, "cid": str})
 
     def __init__(self, session, deviceid, usertoken):
         self._session = session
@@ -72,26 +72,21 @@ class AbemaTVLicenseAdapter(BaseAdapter):
             "osLang": "ja_JP",
             "osTimezone": "Asia/Tokyo",
             "appId": "tv.abema",
-            "appVersion": "3.27.1"
+            "appVersion": "3.27.1",
         }
         auth_header = {"Authorization": f"Bearer {self.usertoken}"}
-        res = self._session.http.get(self._MEDIATOKEN_API, params=params,
-                                     headers=auth_header)
-        jsonres = self._session.http.json(res,
-                                          schema=self._MEDIATOKEN_SCHEMA)
-        mediatoken = jsonres['token']
+        res = self._session.http.get(self._MEDIATOKEN_API, params=params, headers=auth_header)
+        jsonres = self._session.http.json(res, schema=self._MEDIATOKEN_SCHEMA)
+        mediatoken = jsonres["token"]
 
-        res = self._session.http.post(self._LICENSE_API,
-                                      params={"t": mediatoken},
-                                      json={"kv": "a", "lt": ticket})
-        jsonres = self._session.http.json(res,
-                                          schema=self._LICENSE_SCHEMA)
-        cid = jsonres['cid']
-        k = jsonres['k']
+        res = self._session.http.post(self._LICENSE_API, params={"t": mediatoken}, json={"kv": "a", "lt": ticket})
+        jsonres = self._session.http.json(res, schema=self._LICENSE_SCHEMA)
+        cid = jsonres["cid"]
+        k = jsonres["k"]
 
         res = sum(self.STRTABLE.find(k[i]) * (58 ** (len(k) - 1 - i)) for i in range(len(k)))
 
-        encvideokey = struct.pack('>QQ', res >> 64, res & 0xffffffffffffffff)
+        encvideokey = struct.pack(">QQ", res >> 64, res & 0xFFFFFFFFFFFFFFFF)
 
         # HKEY:
         # RC4KEY = unhexlify('DB98A8E7CECA3424D975280F90BD03EE')
@@ -99,16 +94,13 @@ class AbemaTVLicenseAdapter(BaseAdapter):
         #                     b'FC5DB29E4352DE05FC4CF2C1005804BB')
         # rc4 = ARC4.new(RC4KEY)
         # HKEY = rc4.decrypt(RC4DATA)
-        h = hmac.new(unhexlify(self.HKEY),
-                     (cid + self.deviceid).encode("utf-8"),
-                     digestmod=hashlib.sha256)
+        h = hmac.new(unhexlify(self.HKEY), (cid + self.deviceid).encode("utf-8"), digestmod=hashlib.sha256)
         enckey = h.digest()
 
         aes = AES.new(enckey, AES.MODE_ECB)
         return aes.decrypt(encvideokey)
 
-    def send(self, request, stream=False, timeout=None, verify=True, cert=None,
-             proxies=None):
+    def send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
         resp = Response()
         resp.status_code = 200
         ticket = re.findall(r"abematv-license://(.*)", request.url)[0]
@@ -119,15 +111,18 @@ class AbemaTVLicenseAdapter(BaseAdapter):
         return
 
 
-@pluginmatcher(re.compile(r"""
-    https?://abema\.tv/(
-        now-on-air/(?P<onair>[^?]+)
-        |
-        video/episode/(?P<episode>[^?]+)
-        |
-        channels/.+?/slots/(?P<slots>[^?]+)
-    )
-""", re.VERBOSE))
+@pluginmatcher(
+    name="onair",
+    pattern=re.compile(r"https?://abema\.tv/now-on-air/(?P<onair>[^?]+)"),
+)
+@pluginmatcher(
+    name="episode",
+    pattern=re.compile(r"https?://abema\.tv/video/episode/(?P<episode>[^?]+)"),
+)
+@pluginmatcher(
+    name="slots",
+    pattern=re.compile(r"https?://abema\.tv/channels/.+?/slots/(?P<slots>[^?]+)"),
+)
 class AbemaTV(Plugin):
     _CHANNEL = "https://api.abema.io/v1/channels"
 
@@ -141,18 +136,26 @@ class AbemaTV(Plugin):
 
     _SLOTM3U8 = "https://vod-abematv.akamaized.net/slot/{0}/playlist.m3u8"
 
-    SECRETKEY = (b"v+Gjs=25Aw5erR!J8ZuvRrCx*rGswhB&qdHd_SYerEWdU&a?3DzN9B"
-                 b"Rbp5KwY4hEmcj5#fykMjJ=AuWz5GSMY-d@H7DMEh3M@9n2G552Us$$"
-                 b"k9cD=3TxwWe86!x#Zyhe")
+    SECRETKEY = (
+        b"v+Gjs=25Aw5erR!J8ZuvRrCx*rGswhB&qdHd_SYerEWdU&a?3DzN9B"
+        + b"Rbp5KwY4hEmcj5#fykMjJ=AuWz5GSMY-d@H7DMEh3M@9n2G552Us$$"
+        + b"k9cD=3TxwWe86!x#Zyhe"
+    )
 
-    _USER_SCHEMA = validate.Schema({"profile": {"userId": validate.text},
-                                    "token": validate.text})
+    _USER_SCHEMA = validate.Schema({"profile": {"userId": str}, "token": str})
 
-    _CHANNEL_SCHEMA = validate.Schema({"channels": [{"id": validate.text,
-                                      "name": validate.text,
-                                       "playback": {validate.optional("dash"):
-                                                    validate.text,
-                                                    "hls": validate.text}}]})
+    _CHANNEL_SCHEMA = validate.Schema({
+        "channels": [
+            {
+                "id": str,
+                "name": str,
+                "playback": {
+                    validate.optional("dash"): str,
+                    "hls": str,
+                },
+            },
+        ],
+    })
 
     _PRGM_SCHEMA = validate.Schema({"terms": [{validate.optional("onDemandType"): int}]})
 
@@ -160,7 +163,7 @@ class AbemaTV(Plugin):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.session.http.headers.update({'User-Agent': useragents.CHROME})
+        self.session.http.headers.update({"User-Agent": useragents.CHROME})
 
     def _generate_applicationkeysecret(self, deviceid):
         deviceid = deviceid.encode("utf-8")  # for python3
@@ -173,14 +176,14 @@ class AbemaTV(Plugin):
         h = hmac.new(self.SECRETKEY, digestmod=hashlib.sha256)
         h.update(self.SECRETKEY)
         tmp = h.digest()
-        for i in range(time_struct.tm_mon):
+        for _ in range(time_struct.tm_mon):
             h = hmac.new(self.SECRETKEY, digestmod=hashlib.sha256)
             h.update(tmp)
             tmp = h.digest()
         h = hmac.new(self.SECRETKEY, digestmod=hashlib.sha256)
         h.update(urlsafe_b64encode(tmp).rstrip(b"=") + deviceid)
         tmp = h.digest()
-        for i in range(time_struct.tm_mday % 5):
+        for _ in range(time_struct.tm_mday % 5):
             h = hmac.new(self.SECRETKEY, digestmod=hashlib.sha256)
             h.update(tmp)
             tmp = h.digest()
@@ -189,7 +192,7 @@ class AbemaTV(Plugin):
         h.update(urlsafe_b64encode(tmp).rstrip(b"=") + ts_1hour_str)
         tmp = h.digest()
 
-        for i in range(time_struct.tm_hour % 5):  # utc hour
+        for _ in range(time_struct.tm_hour % 5):  # utc hour
             h = hmac.new(self.SECRETKEY, digestmod=hashlib.sha256)
             h.update(tmp)
             tmp = h.digest()
@@ -199,8 +202,7 @@ class AbemaTV(Plugin):
     def _is_playable(self, vtype, vid):
         auth_header = {"Authorization": f"Bearer {self.usertoken}"}
         if vtype == "episode":
-            res = self.session.http.get(self._PRGM_API.format(vid),
-                                        headers=auth_header)
+            res = self.session.http.get(self._PRGM_API.format(vid), headers=auth_header)
             jsonres = self.session.http.json(res, schema=self._PRGM_SCHEMA)
             playable = False
             for item in jsonres["terms"]:
@@ -208,23 +210,20 @@ class AbemaTV(Plugin):
                     playable = True
             return playable
         elif vtype == "slots":
-            res = self.session.http.get(self._SLOTS_API.format(vid),
-                                        headers=auth_header)
+            res = self.session.http.get(self._SLOTS_API.format(vid), headers=auth_header)
             jsonres = self.session.http.json(res, schema=self._SLOT_SCHEMA)
             return jsonres["slot"]["flags"].get("timeshiftFree", False) is True
 
     def _get_streams(self):
         deviceid = str(uuid.uuid4())
         appkeysecret = self._generate_applicationkeysecret(deviceid)
-        json_data = {"deviceId": deviceid,
-                     "applicationKeySecret": appkeysecret}
+        json_data = {"deviceId": deviceid, "applicationKeySecret": appkeysecret}
         res = self.session.http.post(self._USER_API, json=json_data)
         jsonres = self.session.http.json(res, schema=self._USER_SCHEMA)
-        self.usertoken = jsonres['token']  # for authorzation
+        self.usertoken = jsonres["token"]  # for authorzation
 
-        matchresult = self.match
-        if matchresult.group("onair"):
-            onair = matchresult.group("onair")
+        if self.matches["onair"]:
+            onair = self.match["onair"]
             if onair == "news-global":
                 self._CHANNEL = update_qsd(self._CHANNEL, {"division": "1"})
             res = self.session.http.get(self._CHANNEL)
@@ -234,16 +233,16 @@ class AbemaTV(Plugin):
                 if onair == channel["id"]:
                     break
             else:
-                raise NoStreamsError(self.url)
+                raise NoStreamsError
             playlisturl = channel["playback"]["hls"]
-        elif matchresult.group("episode"):
-            episode = matchresult.group("episode")
+        elif self.matches["episode"]:
+            episode = self.match["episode"]
             if not self._is_playable("episode", episode):
                 log.error("Premium stream is not playable")
                 return {}
             playlisturl = self._PRGM3U8.format(episode)
-        elif matchresult.group("slots"):
-            slots = matchresult.group("slots")
+        elif self.matches["slots"]:
+            slots = self.match["slots"]
             if not self._is_playable("slots", slots):
                 log.error("Premium stream is not playable")
                 return {}
@@ -252,9 +251,7 @@ class AbemaTV(Plugin):
         log.debug("URL={0}".format(playlisturl))
 
         # hook abematv private protocol
-        self.session.http.mount("abematv-license://",
-                                AbemaTVLicenseAdapter(self.session, deviceid,
-                                                      self.usertoken))
+        self.session.http.mount("abematv-license://", AbemaTVLicenseAdapter(self.session, deviceid, self.usertoken))
 
         return AbemaTVHLSStream.parse_variant_playlist(self.session, playlisturl)
 

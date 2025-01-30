@@ -12,33 +12,47 @@ your platform:
 
 .. rst-class:: table-custom-layout table-custom-layout-platform-locations
 
-================= ====================================================
-Platform          Location
-================= ====================================================
-Linux, BSD        - ``${XDG_CONFIG_HOME:-${HOME}/.config}/streamlink/config``
+.. list-table::
+    :header-rows: 1
+    :width: 100%
 
-                  Deprecated:
-
-                  - ``${HOME}/.streamlinkrc``
-macOS             - ``${HOME}/Library/Application Support/streamlink/config``
-
-                  Deprecated:
-
-                  - ``${XDG_CONFIG_HOME:-${HOME}/.config}/streamlink/config``
-                  - ``${HOME}/.streamlinkrc``
-Windows           - ``%APPDATA%\streamlink\config``
-
-                  Deprecated:
-
-                  - ``%APPDATA%\streamlink\streamlinkrc``
-================= ====================================================
+    * - Platform
+      - Location
+    * - Linux, BSD
+      - | **Path**
+        | ``${XDG_CONFIG_HOME:-${HOME}/.config}/streamlink/config``
+        | **Example**
+        | ``/home/USERNAME/.config/streamlink/config``
+    * - macOS
+      - | **Path**
+        | ``${HOME}/Library/Application Support/streamlink/config``
+        | **Example**
+        | ``/Users/USERNAME/Library/Application Support/streamlink/config``
+    * - Windows
+      - | **Path**
+        | ``%APPDATA%\streamlink\config``
+        | **Example**
+        | ``C:\Users\USERNAME\AppData\Roaming\streamlink\config``
 
 You can also specify the location yourself using the :option:`--config` option.
 
+Loading config files can be suppressed using the :option:`--no-config` option.
+
 .. warning::
 
-  On Windows, there is a default config created by the installer, but on any
-  other platform you must create the file yourself.
+  Streamlink's Windows installers automatically create a config file if it doesn't exist yet, but on any
+  other platform or installation method, you must create the file yourself.
+
+.. note::
+
+   The ``XDG_CONFIG_HOME`` environment variable is part of the `XDG base directory specification`_ (`Arch Linux Wiki <xdg-base-dir-arch-wiki_>`_).
+
+   The ``${VARIABLENAME:-DEFAULTVALUE}`` syntax is explained `here <Parameter expansion_>`_.
+
+.. _XDG base directory specification: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+.. _xdg-base-dir-arch-wiki: https://wiki.archlinux.org/title/XDG_Base_Directory
+.. _Parameter expansion: https://www.gnu.org/software/bash/manual/bash.html#Shell-Parameter-Expansion
+
 
 Syntax
 ------
@@ -53,9 +67,9 @@ or for an option without value::
 
   option
 
-.. note::
-    Any quotes used will be part of the value, so only use them when the value needs them,
-    e.g. when specifying a player with a path which contains spaces.
+.. warning::
+
+    Any quotes will be used as part of the argument value.
 
 Example
 ^^^^^^^
@@ -63,50 +77,43 @@ Example
 .. code-block:: bash
 
     # Player options
-    player=mpv --cache 2048
+    player=mpv
+    player-args=--cache 2048
     player-no-close
-
-.. note::
-    Full player paths are supported via configuration file options such as
-    ``player="C:\mpv-x86_64\mpv"``
 
 
 Plugin specific configuration file
 ----------------------------------
 
-You may want to use specific options for some plugins only. This
-can be accomplished by placing those settings inside a plugin specific
-config file. Options inside these config files will override the main
+You may want to use specific options for some plugins only. This can be accomplished by setting these options
+in plugin-specific config files. Options defined in plugin-specific config files override options of the main
 config file when a URL matching the plugin is used.
 
-Streamlink expects this config to be named like the main config but
-with ``.<plugin name>`` attached to the end.
-
-Examples
-^^^^^^^^
+Streamlink expects these configs to be named like the main config but with ``.<plugin name>`` attached to the end.
 
 .. rst-class:: table-custom-layout table-custom-layout-platform-locations
 
-================= ====================================================
-Platform          Location
-================= ====================================================
-Linux, BSD        - ``${XDG_CONFIG_HOME:-${HOME}/.config}/streamlink/config.pluginname``
+.. list-table::
+    :header-rows: 1
+    :width: 100%
 
-                  Deprecated:
-
-                  - ``${HOME}/.streamlinkrc.pluginname``
-macOS             - ``${HOME}/Library/Application Support/streamlink/config.pluginname``
-
-                  Deprecated:
-
-                  - ``${XDG_CONFIG_HOME:-${HOME}/.config}/streamlink/config.pluginname``
-                  - ``${HOME}/.streamlinkrc.pluginname``
-Windows           - ``%APPDATA%\streamlink\config.pluginname``
-
-                  Deprecated:
-
-                  - ``%APPDATA%\streamlink\streamlinkrc.pluginname``
-================= ====================================================
+    * - Platform
+      - Location
+    * - Linux, BSD
+      - | **Path**
+        | ``${XDG_CONFIG_HOME:-${HOME}/.config}/streamlink/config.pluginname``
+        | **Example**
+        | ``/home/USERNAME/.config/streamlink/config.twitch``
+    * - macOS
+      - | **Path**
+        | ``${HOME}/Library/Application Support/streamlink/config.pluginname``
+        | **Example**
+        | ``/Users/USERNAME/Library/Application Support/streamlink/config.twitch``
+    * - Windows
+      - | **Path**
+        | ``%APPDATA%\streamlink\config.pluginname``
+        | **Example**
+        | ``C:\Users\USERNAME\AppData\Roaming\streamlink\config.twitch``
 
 Have a look at the :ref:`list of plugins <plugins:Plugins>`, or
 check the :option:`--plugins` option to see the name of each built-in plugin.

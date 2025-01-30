@@ -38,60 +38,56 @@ While working on any kind of python-based project, it is usually best to do this
 the Python environment of the host system. This ensures that development can be done in a clean space which is free of version
 conflicts and other unrelated packages.
 
-First, make sure that you have the latest stable versions of Python and pip installed.
+First, make sure that you have the latest stable versions of Python and `pip`_ installed:
 
 .. code-block:: bash
 
     python --version
     pip --version
 
-As the second preparation step, install the latest version of ``virtualenv``, either via your system's package manager or pip,
-and create a new virtual environment. These environments can be created separately for different Python versions. Please refer
-to the `virtualenv documentation`_ for all available parameters. There are also several wrappers around virtualenv available.
+Then set up a new virtual environment using `venv`_ of the Python standard library:
 
 .. code-block:: bash
 
-    pip install --upgrade --user virtualenv
-    virtualenv --version
-
     # replace ~/venvs/streamlink with your path of choice and give it a proper name
-    virtualenv --download --verbose ~/venvs/streamlink
+    python -m venv ~/venvs/streamlink
 
-Now activate the virtual environment by sourcing the activation shell script.
+Now activate the virtual environment by sourcing the activation shell script:
 
 .. code-block:: bash
 
     source ~/venvs/streamlink/bin/activate
 
-    # non-POSIX shells have their own activation script, eg. FISH
+    # non-POSIX shells have their own activation script, e.g. FISH
     source ~/venvs/streamlink/bin/activate.fish
 
-    # on Windows, activation scripts are located in the Scripts/ subdirectory instead of bin/
-    source ~/venvs/streamlink/Scripts/activate
+.. code-block:: pwsh
 
-.. _virtualenv documentation: https://virtualenv.pypa.io/en/latest/
+    # on Windows, activation scripts are located in the Scripts/ subdirectory instead of bin/
+    ~\venvs\streamlink\Scripts\Activate.ps1
+
+.. _pip: https://pip.pypa.io/en/stable/
+.. _venv: https://docs.python.org/3/library/venv.html
 
 
 Installing Streamlink
 ^^^^^^^^^^^^^^^^^^^^^
 
-After activating the new virtual environment, Streamlink's build dependencies and Streamlink itself need to be installed.
+After activating the new virtual environment, Streamlink's development dependencies and Streamlink itself need to be installed.
 Regular development dependencies and documentation related dependencies are listed in the text files shown below and need to
 be installed separately.
 
 .. code-block:: bash
 
     # install additional dependencies
-    pip install -r dev-requirements.txt
-    pip install -r docs-requirements.txt
+    pip install -U -r dev-requirements.txt
+    pip install -U -r docs-requirements.txt
 
-    # install Streamlink from source
-    # check setup.py for optional dependencies and install those manually if you need to
+    # install Streamlink in "editable" mode
     pip install -e .
 
     # validate that Streamlink is working
-    which streamlink
-    streamlink --version
+    streamlink --loglevel=debug
 
 
 Validating changes
@@ -104,16 +100,44 @@ performing these checks locally avoids unnecessary build failures.
 .. code-block:: bash
 
     # run automated tests
-    python -m pytest -ra
+    pytest
     # or just run a subset of all tests
-    python -m pytest -ra path/to/test-file.py::TestClassName::test_method_name ...
+    pytest path/to/test-file.py::TestClassName::test_method_name ...
 
     # check code for linting errors
-    flake8
+    ruff check .
+    # check code for formatting errors
+    ruff format --diff .
+    # check code for typing errors
+    mypy
 
     # build the documentation
     make --directory=docs clean html
-    $BROWSER ./docs/_build/html/index.html
+
+    # check the documentation
+    python -m http.server 8000 --bind '127.0.0.1' --directory 'docs/_build/html/'
+    "${BROWSER}" http://127.0.0.1:8000/
+
+
+Code style
+----------
+
+Streamlink uses `Ruff`_ as primary code `linting <Ruff-linter>`_ and `formatting <Ruff-formatter>`_ tool.
+
+The project aims to use best practices for achieving great code readability with minimal git diffs,
+as detailed in :pep:`8` and implemented in related linting and formatting tools, such as `Black`_.
+
+For detailed linting and formatting configurations specific to Streamlink, please have a look at `pyproject.toml`_.
+
+It might be helpful to new plugin authors to pick a small and recently modified existing plugin to use as an initial
+template from which to work. If care is taken to preserve existing blank lines during modification, the main plugin
+structure should be compliant-ready for `linting <Validating changes_>`_.
+
+.. _Ruff: https://github.com/astral-sh/ruff
+.. _Ruff-linter: https://docs.astral.sh/ruff/linter/
+.. _Ruff-formatter: https://docs.astral.sh/ruff/formatter/
+.. _Black: https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html
+.. _pyproject.toml: https://github.com/streamlink/streamlink/blob/master/pyproject.toml
 
 
 Plugins
@@ -127,13 +151,16 @@ Adding plugins
    Check the git log for recently added or modified plugins to help you get an overview of what's needed to properly implement
    a plugin. A complete guide is currently not available.
 
-   Each plugin class requires at least one ``pluginmatcher`` decorator which defines the URL regex and matching priority.
+   Each plugin class requires at least one ``pluginmatcher`` decorator which defines the URL regex, matching priority
+   and an optional name.
 
-   Plugins need to implement the ``_get_streams()`` method which either returns a list of ``Stream`` instances or which yields
-   ``Stream`` instances. ``Stream`` is the base class of ``HTTPStream``, ``HLSStream`` and ``DASHStream``.
+   Plugins need to implement the :meth:`_get_streams() <streamlink.plugin.Plugin._get_streams>` method which must return
+   ``Mapping[str,Stream] | Iterable[Tuple[str,Stream]] | Iterator[Tuple[str,Stream]] | None``.
+   ``Stream`` is the base class of :class:`HTTPStream <streamlink.stream.HTTPStream>`,
+   :class:`HLSStream <streamlink.stream.HLSStream>` and :class:`DASHStream <streamlink.stream.DASHStream>`.
 
    Plugins also require metadata which will be read when building the documentation. This metadata contains information about
-   the plugin, eg. which URLs it accepts, which kind of streams it returns, whether content is region-locked, or if any kind of
+   the plugin, e.g. which URLs it accepts, which kind of streams it returns, whether content is region-locked, or if any kind of
    account or subscription is needed for watching the content, etc. This metadata needs to be set as a header comment at
    the beginning of the plugin file, in the following format (order of items is important):
 
@@ -162,6 +189,11 @@ Adding plugins
    capture group names and values (excluding ``None`` values), or a tuple of unnamed capture group values. URLs from the
    ``should_match_groups`` list automatically get added to ``should_match`` and don't need to be added twice.
 
+   If the plugin defines named matchers, then URLs in the test fixtures must be tuples of the matcher name and the URL itself.
+   Unnamed matchers must not match named URL test fixtures and vice versa.
+
+   Every plugin matcher must have at least one URL test fixture that matches.
+
    .. code-block:: python
 
       from streamlink.plugins.pluginfile import MyPluginClassName
@@ -173,14 +205,15 @@ Adding plugins
 
           should_match = [
               "https://host/path/one",
-              "https://host/path/two",
+              ("specific-path-matcher", "https://host/path/two"),
           ]
 
           should_match_groups = [
               ("https://host/stream/123", {"stream": "123"}),
-              ("https://host/user/one", {"user": "one"}),
-              ("https://host/stream/456", ("456", None)),
-              ("https://host/user/two", (None, "two")),
+              ("https://host/stream/456/foo", ("456", "foo")),
+              (("user-matcher", "https://host/user/one"), {"user": "one"}),
+              (("user-matcher", "https://host/user/two"), ("two", None)),
+              (("user-matcher", "https://host/user/two/foo"), ("two", "foo")),
           ]
 
           should_not_match = [

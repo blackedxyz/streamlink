@@ -13,15 +13,13 @@ from urllib.parse import parse_qsl, urlparse, urlunparse
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(r"""
-    https?://(?:
-        live\.(rsi)\.ch/|
-        (?:www\.)?(srf)\.ch/sport/resultcenter
-    )
-""", re.VERBOSE))
+@pluginmatcher(
+    re.compile(r"https?://(?:live\.(rsi)\.ch/|(?:www\.)?(srf)\.ch/sport/resultcenter)"),
+)
 class Swisstxt(Plugin):
     api_url = "http://event.api.swisstxt.ch/v1/stream/{site}/byEventItemIdAndType/{id}/HLS"
 
@@ -42,9 +40,7 @@ class Swisstxt(Plugin):
             return
 
         stream_url, params = self.get_stream_url(event_id)
-        return HLSStream.parse_variant_playlist(self.session,
-                                                stream_url,
-                                                params=params)
+        return HLSStream.parse_variant_playlist(self.session, stream_url, params=params)
 
 
 __plugin__ = Swisstxt

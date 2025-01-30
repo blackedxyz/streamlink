@@ -2,6 +2,9 @@
 $description Chinese live-streaming platform for live video game broadcasts and individual live streams.
 $url huajiao.com
 $type live
+$metadata author
+$metadata category
+$metadata title
 """
 
 import base64
@@ -16,9 +19,9 @@ from streamlink.stream.hls import HLSStream
 from streamlink.stream.http import HTTPStream
 
 
-@pluginmatcher(re.compile(
-    r"https?://(?:www\.)?huajiao\.com/l/(?P<channel>[^/]+)"
-))
+@pluginmatcher(
+    re.compile(r"https?://(?:www\.)?huajiao\.com/l/(?P<channel>[^/]+)"),
+)
 class Huajiao(Plugin):
     URL_LAPI = "https://g2.live.360.cn/liveplay"
 

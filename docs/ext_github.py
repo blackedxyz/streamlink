@@ -9,6 +9,7 @@ import re
 from docutils import nodes
 from docutils.transforms import Transform
 
+
 GITHUB_ISSUE_URL = "https://github.com/{0}/issues/{1}"
 GITHUB_USER_URL = "https://github.com/{1}"
 
@@ -36,7 +37,7 @@ class GithubReferences(Transform):
             new_nodes = []
             last_ref_end = 0
             for match in pattern.finditer(text):
-                head = text[last_ref_end:match.start()]
+                head = text[last_ref_end : match.start()]
                 if head:
                     new_nodes.append(nodes.Text(head))
 
@@ -45,7 +46,7 @@ class GithubReferences(Transform):
                 link = nodes.reference(
                     match.group(0),
                     match.group(0),
-                    refuri=ref
+                    refuri=ref,
                 )
                 new_nodes.append(link)
 
@@ -62,5 +63,5 @@ class GithubReferences(Transform):
 def setup(app):
     app.add_config_value("github_project", None, "env")
     app.add_config_value("github_issue_pattern", r"#(\d+)", "env")
-    app.add_config_value("github_mention_pattern", r"@(\w+)", "env")
+    app.add_config_value("github_mention_pattern", r"@([\w-]+)", "env")
     app.add_transform(GithubReferences)

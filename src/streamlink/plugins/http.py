@@ -6,12 +6,13 @@ from streamlink.plugin.plugin import parse_params
 from streamlink.stream.http import HTTPStream
 from streamlink.utils.url import update_scheme
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(
-    r"httpstream://(?P<url>\S+)(?:\s(?P<params>.+))?"
-))
+@pluginmatcher(
+    re.compile(r"httpstream://(?P<url>\S+)(?:\s(?P<params>.+))?$"),
+)
 class HTTPStreamPlugin(Plugin):
     def _get_streams(self):
         data = self.match.groupdict()

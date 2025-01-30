@@ -10,20 +10,16 @@ from tests.plugin.testplugin import TestPlugin as _TestPlugin
 
 def test_session():
     console_input = ConsoleUserInputRequester(Mock())
-    session = Streamlink({"user-input-requester": console_input})
+    session = Streamlink({"user-input-requester": console_input}, plugins_builtin=False)
     assert session.get_option("user-input-requester") is console_input
 
 
 class TestPluginUserInput:
-    @pytest.fixture
-    def session(self):
-        return Streamlink()
-
-    @pytest.fixture
+    @pytest.fixture()
     def testplugin(self, session: Streamlink):
         return _TestPlugin(session, "http://example.com/stream")
 
-    @pytest.fixture
+    @pytest.fixture()
     def console_input(self, request, session: Streamlink):
         isatty: bool = request.param
         with patch("streamlink_cli.console.sys.stdin.isatty", return_value=isatty):

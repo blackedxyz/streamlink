@@ -1,92 +1,62 @@
 """
 $description Live TV channels from LTV, a Latvian public, state-owned broadcaster.
 $url ltv.lsm.lv
-$type live
+$url replay.lsm.lv
+$type live, vod
 $region Latvia
 """
 
 import logging
 import re
-from urllib.parse import urlsplit, urlunsplit
 
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
-from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
+from streamlink.stream.hls import HLSStream
+
 
 log = logging.getLogger(__name__)
 
 
-def copy_query_url(to, from_):
-    """
-    Replace the query string in one URL with the query string from another URL
-    """
-    return urlunsplit(urlsplit(to)._replace(query=urlsplit(from_).query))
-
-
-class LTVHLSStreamWorker(HLSStreamWorker):
-    def process_sequences(self, playlist, sequences):
-        super().process_sequences(playlist, sequences)
-        # update the segment URLs with the query string from the playlist URL
-        self.playlist_sequences = [
-            sequence._replace(
-                segment=sequence.segment._replace(
-                    uri=copy_query_url(sequence.segment.uri, self.stream.url)
-                )
-            )
-            for sequence in self.playlist_sequences
-        ]
-
-
-class LTVHLSStreamReader(HLSStreamReader):
-    __worker__ = LTVHLSStreamWorker
-
-
-class LTVHLSStream(HLSStream):
-    __reader__ = LTVHLSStreamReader
-
-    @classmethod
-    def parse_variant_playlist(cls, *args, **kwargs):
-        streams = super().parse_variant_playlist(*args, **kwargs)
-
-        for stream in streams.values():
-            stream.args["url"] = copy_query_url(stream.args["url"], stream.multivariant.uri)
-
-        return streams
-
-
-@pluginmatcher(re.compile(
-    r"https://ltv\.lsm\.lv/lv/tiesraide"
-))
+@pluginmatcher(
+    re.compile(r"https://(?:ltv|replay)\.lsm\.lv/(?:lv/tiesraide|ru/efir)/"),
+)
 class LtvLsmLv(Plugin):
-    URL_IFRAME = "https://ltv.lsm.lv/embed/live?c={embed_id}"
     URL_API = "https://player.cloudycdn.services/player/ltvlive/channel/{channel_id}/"
 
     def _get_streams(self):
         self.session.http.headers.update({"Referer": self.url})
 
-        embed_id = self.session.http.get(self.url, schema=validate.Schema(
-            re.compile(r"""embed_id\s*:\s*(?P<q>")(?P<embed_id>\w+)(?P=q)"""),
-            validate.any(None, validate.get("embed_id")),
-        ))
-        if not embed_id:
-            return
-        log.debug(f"Found embed ID: {embed_id}")
-
-        iframe_url = self.URL_IFRAME.format(embed_id=embed_id)
-        starts_at, channel_id = self.session.http.get(iframe_url, schema=validate.Schema(
-            validate.parse_html(),
-            validate.xml_xpath_string(".//live[1]/@*[name()=':embed-data']"),
-            str,
-            validate.parse_json(),
-            {
-                "parentInfo": {"starts_at": validate.any(None, str)},
-                "source": {"item_id": str},
-            },
-            validate.union_get(
-                ("parentInfo", "starts_at"),
-                ("source", "item_id"),
+        iframe_url = self.session.http.get(
+            self.url,
+            schema=validate.Schema(
+                re.compile(r"""(?P<q>")https:\\u002F\\u002Fltv\.lsm\.lv\\u002Fembed\\u002Flive\?\S+?(?P=q)"""),
+                validate.none_or_all(
+                    validate.get(0),
+                    validate.parse_json(),
+                ),
             ),
-        ))
+        )
+        if not iframe_url:
+            log.error("Could not find video player iframe")
+            return
+
+        starts_at, channel_id = self.session.http.get(
+            iframe_url,
+            schema=validate.Schema(
+                validate.parse_html(),
+                validate.xml_xpath_string(".//live[1]/@*[name()=':embed-data']"),
+                str,
+                validate.parse_json(),
+                {
+                    "parentInfo": {"starts_at": validate.any(None, str)},
+                    "source": {"item_id": str},
+                },
+                validate.union_get(
+                    ("parentInfo", "starts_at"),
+                    ("source", "item_id"),
+                ),
+            ),
+        )
         if channel_id is None:
             return
         log.debug(f"Found channel ID: {channel_id}")
@@ -117,7 +87,7 @@ class LtvLsmLv(Plugin):
             ),
         )
         for surl in stream_sources:
-            yield from LTVHLSStream.parse_variant_playlist(self.session, surl).items()
+            yield from HLSStream.parse_variant_playlist(self.session, surl).items()
 
 
 __plugin__ = LtvLsmLv

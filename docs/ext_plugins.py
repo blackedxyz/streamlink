@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import abc
 import ast
 import pkgutil
 import re
 import tokenize
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 from docutils import nodes
 from docutils.parsers.rst import Directive
@@ -30,7 +33,7 @@ class IMetadataItem(IDatalistItem):
 class MetadataItem(IMetadataItem):
     def __init__(self, title: str):
         self.title = title
-        self.value: Optional[str] = None
+        self.value: str | None = None
 
     def set(self, value: str) -> None:
         self.value = value
@@ -44,7 +47,7 @@ class MetadataItem(IMetadataItem):
 class MetadataList(IMetadataItem):
     def __init__(self, title: str):
         self.title = title
-        self.value: List[str] = []
+        self.value: list[str] = []
 
     def set(self, value: str) -> None:
         self.value.append(value)
@@ -52,10 +55,35 @@ class MetadataList(IMetadataItem):
     def generate(self) -> Iterator[str]:
         if not self.value:
             return
+        yield f":{self.title}: - {' '.join(self.get_item(0))}"
         indent = " " * len(f":{self.title}:")
-        yield f":{self.title}: - {self.value[0]}"
-        for val in self.value[1:]:
-            yield f"{indent} - {val}"
+        for idx in range(1, len(self.value)):
+            yield f"{indent} - {' '.join(self.get_item(idx))}"
+
+    def get_item(self, idx: int) -> Iterator[str]:
+        yield self.value[idx]
+
+
+class MetadataWebbrowserItem(MetadataItem):
+    def __init__(self):
+        super().__init__("Web browser")
+
+    def generate(self) -> Iterator[str]:
+        if self.value is None:
+            return
+        yield from super().generate()
+        yield " [:ref:`? <cli:Web browser options>`]"
+
+
+class MetadataMetadataList(MetadataList):
+    def __init__(self):
+        super().__init__("Metadata")
+
+    def get_item(self, idx: int) -> Iterator[str]:
+        variable, *data = str(self.value[idx]).split(" ")
+        yield f":ref:`{variable} <cli/metadata:Variables>`"
+        if data:
+            yield " ".join(["-", *data])
 
 
 class PluginOnGithub(IDatalistItem):
@@ -104,9 +132,6 @@ class PluginArguments(ast.NodeVisitor, IDatalistItem):
             ):
                 continue
 
-            if any(kw.value.value for kw in decorator.keywords if kw.arg == "is_global" and type(kw.value) is ast.Constant):
-                continue
-
             if any(
                 True
                 for kw in decorator.keywords
@@ -135,7 +160,7 @@ class PluginArguments(ast.NodeVisitor, IDatalistItem):
                 decorator.args
                 and type(decorator.args[0]) is ast.Constant
                 and decorator.args[0].value
-            )
+            )  # fmt: skip
             if name:
                 self.arguments.append(f"{self.pluginname}-{name}")
 
@@ -143,15 +168,17 @@ class PluginArguments(ast.NodeVisitor, IDatalistItem):
 class PluginMetadata:
     def __init__(self, name: str, pluginast):
         self.name: str = name
-        self.items: Dict[str, IMetadataItem] = dict(
+        self.items: dict[str, IMetadataItem] = dict(
             description=MetadataItem("Description"),
             url=MetadataList("URL(s)"),
             type=MetadataItem("Type"),
+            webbrowser=MetadataWebbrowserItem(),
+            metadata=MetadataMetadataList(),
             region=MetadataItem("Region"),
             account=MetadataItem("Account"),
-            notes=MetadataItem("Notes"),
+            notes=MetadataList("Notes"),
         )
-        self.additional: List[IDatalistItem] = [
+        self.additional: list[IDatalistItem] = [
             PluginArguments(name, pluginast),
             PluginOnGithub(name),
         ]
@@ -196,7 +223,7 @@ class PluginFinder:
             if pluginmetadata:
                 yield pluginmetadata
 
-    def _parse_plugin(self, pluginname: str, pluginfile: Path) -> Optional[PluginMetadata]:
+    def _parse_plugin(self, pluginname: str, pluginfile: Path) -> PluginMetadata | None:
         with pluginfile.open() as handle:
             # read until the first token has been parsed
             for tokeninfo in tokenize.generate_tokens(handle.readline):
@@ -220,7 +247,7 @@ class PluginFinder:
                 return pluginmetadata
 
             except Exception as err:
-                raise ExtensionError(f"Error while parsing plugin file {pluginfile.name}", err)
+                raise ExtensionError(f"Error while parsing plugin file {pluginfile.name}", err) from err
 
 
 class PluginsDirective(Directive):

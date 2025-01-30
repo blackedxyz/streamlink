@@ -2,22 +2,26 @@
 $description Live TV channels and video on-demand service from RTVE, a Spanish public, state-owned broadcaster.
 $url rtve.es
 $type live, vod
+$metadata id
 $region Spain
 """
+
+from __future__ import annotations
 
 import logging
 import re
 from base64 import b64decode
+from collections.abc import Iterator, Sequence
 from io import BytesIO
-from typing import Iterator, Sequence, Tuple
 from urllib.parse import urlparse
 
-from streamlink.plugin import Plugin, PluginError, pluginargument, pluginmatcher
+from streamlink.plugin import Plugin, PluginError, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.ffmpegmux import MuxedStream
 from streamlink.stream.hls import HLSStream
 from streamlink.stream.http import HTTPStream
 from streamlink.utils.url import update_scheme
+
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +58,7 @@ class Base64Reader:
         a, b, c, d = self.read(4)
         return a << 24 | b << 16 | c << 8 | d
 
-    def read_chunk(self) -> Tuple[str, Sequence[int]]:
+    def read_chunk(self) -> tuple[str, Sequence[int]]:
         size = self.read_int()
         chunktype = self.read_chars(4)
         chunkdata = self.read(size)
@@ -112,7 +116,7 @@ class ZTNR:
         return cls._get_url(data, cls._get_alphabet(alphabet))
 
     @classmethod
-    def translate(cls, data: str) -> Iterator[Tuple[str, str]]:
+    def translate(cls, data: str) -> Iterator[tuple[str, str]]:
         reader = Base64Reader(data.replace("\n", ""))
         for chunk_type, chunk_data in reader:
             if chunk_type == "IEND":
@@ -126,12 +130,8 @@ class ZTNR:
                 yield quality, cls._get_source(alphabet, content)
 
 
-@pluginmatcher(re.compile(
-    r"https?://(?:www\.)?rtve\.es/play/videos/.+"
-))
-@pluginargument(
-    "mux-subtitles",
-    is_global=True,
+@pluginmatcher(
+    re.compile(r"https?://(?:www\.)?rtve\.es/play/videos/.+"),
 )
 class Rtve(Plugin):
     URL_M3U8 = "https://ztnr.rtve.es/ztnr/{id}.m3u8"
@@ -139,17 +139,20 @@ class Rtve(Plugin):
     URL_SUBTITLES = "https://www.rtve.es/api/videos/{id}/subtitulos.json"
 
     def _get_streams(self):
-        self.id = self.session.http.get(self.url, schema=validate.Schema(
-            re.compile(r"\bdata-setup='({.+?})'", re.DOTALL),
-            validate.none_or_all(
-                validate.get(1),
-                validate.parse_json(),
-                {
-                    "idAsset": validate.any(int, validate.all(str, validate.transform(int))),
-                },
-                validate.get("idAsset"),
+        self.id = self.session.http.get(
+            self.url,
+            schema=validate.Schema(
+                re.compile(r"\bdata-setup='({.+?})'", re.DOTALL),
+                validate.none_or_all(
+                    validate.get(1),
+                    validate.parse_json(),
+                    {
+                        "idAsset": validate.any(int, validate.all(str, validate.transform(int))),
+                    },
+                    validate.get("idAsset"),
+                ),
             ),
-        ))
+        )
         if not self.id:
             return
 
@@ -178,17 +181,19 @@ class Rtve(Plugin):
 
         streams = HLSStream.parse_variant_playlist(self.session, url).items()
 
-        if self.options.get("mux-subtitles"):
+        if self.session.get_option("mux-subtitles"):
             subs = self.session.http.get(
                 self.URL_SUBTITLES.format(id=self.id),
                 schema=validate.Schema(
                     validate.parse_json(),
                     {
                         "page": {
-                            "items": [{
-                                "lang": str,
-                                "src": validate.url(),
-                            }],
+                            "items": [
+                                {
+                                    "lang": str,
+                                    "src": validate.url(),
+                                },
+                            ],
                         },
                     },
                     validate.get(("page", "items")),
@@ -198,7 +203,7 @@ class Rtve(Plugin):
                 subtitles = {
                     s["lang"]: HTTPStream(self.session, update_scheme("https://", s["src"], force=True))
                     for s in subs
-                }
+                }  # fmt: skip
                 for quality, stream in streams:
                     yield quality, MuxedStream(self.session, stream, subtitles=subtitles)
                 return

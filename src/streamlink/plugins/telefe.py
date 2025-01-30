@@ -2,6 +2,7 @@
 $description Video content from Telefe, an Argentine TV station.
 $url mitelefe.com
 $type live
+$metadata title
 $region Argentina
 """
 
@@ -12,6 +13,7 @@ from urllib.parse import urljoin
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
+
 
 log = logging.getLogger(__name__)
 
@@ -29,14 +31,26 @@ class Telefe(Plugin):
                     validate.none_or_all(
                         validate.get(1),
                         validate.parse_json(),
-                        {str: {"children": {"top": {"model": {"videos": [{
-                            "title": str,
-                            "sources": validate.all(
-                                [{"url": str, "type": str}],
-                                validate.filter(lambda p: p["type"].lower() == "hls"),
-                                validate.get((0, "url")),
-                            ),
-                        }]}}}}},
+                        {
+                            str: {
+                                "children": {
+                                    "top": {
+                                        "model": {
+                                            "videos": [
+                                                {
+                                                    "title": str,
+                                                    "sources": validate.all(
+                                                        [{"url": str, "type": str}],
+                                                        validate.filter(lambda p: p["type"].lower() == "hls"),
+                                                        validate.get((0, "url")),
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                    },
+                                },
+                            },
+                        },
                         validate.transform(lambda k: next(iter(k.values()))),
                         validate.get(("children", "top", "model", "videos", 0)),
                         validate.union_get("title", "sources"),

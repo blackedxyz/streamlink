@@ -2,6 +2,8 @@
 $description South Korean live-streaming platform for individual live streams.
 $url pandalive.co.kr
 $type live
+$metadata author
+$metadata title
 """
 
 import logging
@@ -11,18 +13,22 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(
-    r"https?://(?:www\.)?pandalive\.co\.kr/"
-))
+@pluginmatcher(
+    re.compile(r"https?://(?:www\.)?pandalive\.co\.kr/live/play/[^/]+"),
+)
 class Pandalive(Plugin):
     def _get_streams(self):
-        media_code = self.session.http.get(self.url, schema=validate.Schema(
-            re.compile(r"""routePath:\s*(?P<q>["'])(\\u002F|/)live(\\u002F|/)play(\\u002F|/)(?P<id>.+?)(?P=q)"""),
-            validate.any(None, validate.get("id")),
-        ))
+        media_code = self.session.http.get(
+            self.url,
+            schema=validate.Schema(
+                re.compile(r"""routePath:\s*(?P<q>["'])(\\u002F|/)live(\\u002F|/)play(\\u002F|/)(?P<id>.+?)(?P=q)"""),
+                validate.any(None, validate.get("id")),
+            ),
+        )
 
         if not media_code:
             return
@@ -31,10 +37,14 @@ class Pandalive(Plugin):
 
         json = self.session.http.post(
             "https://api.pandalive.co.kr/v1/live/play",
+            headers={
+                "Referer": self.url,
+            },
             data={
                 "action": "watch",
                 "userId": media_code,
             },
+            acceptable_status=(200, 400),
             schema=validate.Schema(
                 validate.parse_json(),
                 validate.any(
@@ -48,15 +58,21 @@ class Pandalive(Plugin):
                             "liveType": str,
                         },
                         "PlayList": {
-                            validate.optional("hls"): [{
-                                "url": validate.url(),
-                            }],
-                            validate.optional("hls2"): [{
-                                "url": validate.url(),
-                            }],
-                            validate.optional("hls3"): [{
-                                "url": validate.url(),
-                            }],
+                            validate.optional("hls"): [
+                                {
+                                    "url": validate.url(),
+                                },
+                            ],
+                            validate.optional("hls2"): [
+                                {
+                                    "url": validate.url(),
+                                },
+                            ],
+                            validate.optional("hls3"): [
+                                {
+                                    "url": validate.url(),
+                                },
+                            ],
                         },
                         "result": bool,
                         "message": str,
@@ -89,9 +105,17 @@ class Pandalive(Plugin):
         playlist = json["PlayList"]
         for key in ("hls", "hls2", "hls3"):
             # use the first available HLS stream
-            if key in playlist and playlist[key]:
-                # all stream qualities share the same URL, so just use the first one
-                return HLSStream.parse_variant_playlist(self.session, playlist[key][0]["url"])
+            if not playlist.get(key):
+                continue
+            # all stream qualities share the same URL, so just use the first one
+            return HLSStream.parse_variant_playlist(
+                self.session,
+                playlist[key][0]["url"],
+                headers={
+                    "Origin": "https://www.pandalive.co.kr",
+                    "Referer": self.url,
+                },
+            )
 
 
 __plugin__ = Pandalive

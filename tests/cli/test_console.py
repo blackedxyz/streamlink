@@ -1,137 +1,181 @@
-import unittest
-from io import StringIO
-from unittest.mock import Mock, patch
+from io import BytesIO, TextIOWrapper
+from textwrap import dedent
+from unittest.mock import Mock
+
+import pytest
 
 from streamlink_cli.console import ConsoleOutput
 
 
-class TestConsoleOutput(unittest.TestCase):
-    def test_msg(self):
-        output = StringIO()
+def getvalue(output: TextIOWrapper, size: int = -1):
+    output.seek(0)
+
+    return output.read(size)
+
+
+class TestConsoleOutput:
+    @pytest.fixture(autouse=True)
+    def _isatty(self, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+        isatty = not request.function.__name__.endswith("_no_tty")
+        monkeypatch.setattr("sys.stdin.isatty", lambda: isatty)
+
+    @pytest.fixture()
+    def output(self, request: pytest.FixtureRequest):
+        params = getattr(request, "param", {})
+        params.setdefault("encoding", "utf-8")
+        params.setdefault("errors", "backslashreplace")
+        output = TextIOWrapper(BytesIO(), **params)
+
+        return output
+
+    @pytest.mark.parametrize(
+        ("output", "expected"),
+        [
+            pytest.param(
+                {"encoding": "utf-8"},
+                "Bär: 🐻",
+                id="utf-8 encoding",
+            ),
+            pytest.param(
+                {"encoding": "ascii"},
+                "B\\xe4r: \\U0001f43b",  # Unicode character: "Bear Face" (U+1F43B)
+                id="ascii encoding",
+            ),
+        ],
+        indirect=["output"],
+    )
+    def test_msg(self, output: TextIOWrapper, expected: str):
         console = ConsoleOutput(output)
-        console.msg("foo")
+        console.msg("Bär: 🐻")
         console.msg_json({"test": 1})
-        self.assertEqual("foo\n", output.getvalue())
+        assert getvalue(output) == f"{expected}\n"
 
-    def test_msg_json(self):
-        output = StringIO()
+    @pytest.mark.parametrize(
+        ("output", "expected"),
+        [
+            pytest.param(
+                {"encoding": "utf-8"},
+                "Bär: 🐻",
+                id="utf-8 encoding",
+            ),
+            pytest.param(
+                {"encoding": "ascii"},
+                "B\\u00e4r: \\ud83d\\udc3b",  # Unicode character: "Bear Face" (U+1F43B) - UTF-16: 0xD83D 0xDC3B
+                id="ascii encoding",
+            ),
+        ],
+        indirect=["output"],
+    )
+    def test_msg_json(self, output: TextIOWrapper, expected: str):
         console = ConsoleOutput(output, json=True)
         console.msg("foo")
-        console.msg_json({"test": 1})
-        self.assertEqual('{\n  "test": 1\n}\n', output.getvalue())
+        console.msg_json({"test": "Bär: 🐻"})
+        assert getvalue(output) == f'{{\n  "test": "{expected}"\n}}\n'
 
-    def test_msg_json_object(self):
-        output = StringIO()
+    def test_msg_json_object(self, output: TextIOWrapper):
         console = ConsoleOutput(output, json=True)
-        console.msg_json(Mock(__json__=Mock(return_value={"test": 1})))
-        self.assertEqual('{\n  "test": 1\n}\n', output.getvalue())
+        console.msg_json(Mock(__json__=lambda: {"test": "Hello world, Γειά σου Κόσμε, こんにちは世界"}))  # noqa: RUF001
+        assert getvalue(output) == '{\n  "test": "Hello world, Γειά σου Κόσμε, こんにちは世界"\n}\n'  # noqa: RUF001
 
-    def test_msg_json_list(self):
-        output = StringIO()
+    def test_msg_json_list(self, output: TextIOWrapper):
         console = ConsoleOutput(output, json=True)
-        test_list = ["foo", "bar"]
+        test_list = ["Hello world, Γειά σου Κόσμε, こんにちは世界", '"🐻"']  # noqa: RUF001
         console.msg_json(test_list)
-        self.assertEqual('[\n  "foo",\n  "bar"\n]\n', output.getvalue())
+        assert getvalue(output) == '[\n  "Hello world, Γειά σου Κόσμε, こんにちは世界",\n  "\\"🐻\\""\n]\n'  # noqa: RUF001
 
-    def test_msg_json_merge_object(self):
-        output = StringIO()
+    def test_msg_json_merge_object(self, output: TextIOWrapper):
         console = ConsoleOutput(output, json=True)
         test_obj1 = {"test": 1, "foo": "foo"}
         test_obj2 = Mock(__json__=Mock(return_value={"test": 2}))
         console.msg_json(test_obj1, test_obj2, ["qux"], foo="bar", baz="qux")
-        self.assertEqual(
-            '{\n'
-            '  "test": 2,\n'
-            '  "foo": "bar",\n'
-            '  "baz": "qux"\n'
-            '}\n',
-            output.getvalue()
+        assert (
+            getvalue(output)
+            == dedent("""
+                {
+                  "test": 2,
+                  "foo": "bar",
+                  "baz": "qux"
+                }
+            """).lstrip()
         )
-        self.assertEqual([("test", 1), ("foo", "foo")], list(test_obj1.items()))
+        assert list(test_obj1.items()) == [("test", 1), ("foo", "foo")]
 
-    def test_msg_json_merge_list(self):
-        output = StringIO()
+    def test_msg_json_merge_list(self, output: TextIOWrapper):
         console = ConsoleOutput(output, json=True)
         test_list1 = ["foo", "bar"]
         test_list2 = Mock(__json__=Mock(return_value={"foo": "bar"}))
         console.msg_json(test_list1, ["baz"], test_list2, {"foo": "bar"}, foo="bar", baz="qux")
-        self.assertEqual(
-            '[\n'
-            '  "foo",\n'
-            '  "bar",\n'
-            '  "baz",\n'
-            '  {\n    "foo": "bar"\n  },\n'
-            '  {\n    "foo": "bar"\n  },\n'
-            '  {\n    "foo": "bar",\n    "baz": "qux"\n  }\n'
-            ']\n',
-            output.getvalue()
+        assert (
+            getvalue(output)
+            == dedent("""
+                [
+                  "foo",
+                  "bar",
+                  "baz",
+                  {
+                    "foo": "bar"
+                  },
+                  {
+                    "foo": "bar"
+                  },
+                  {
+                    "foo": "bar",
+                    "baz": "qux"
+                  }
+                ]
+            """).lstrip()
         )
-        self.assertEqual(["foo", "bar"], test_list1)
+        assert test_list1 == ["foo", "bar"]
 
-    @patch("streamlink_cli.console.sys.exit")
-    def test_msg_json_error(self, mock_exit):
-        output = StringIO()
-        console = ConsoleOutput(output, json=True)
-        console.msg_json({"error": "bad"})
-        self.assertEqual('{\n  "error": "bad"\n}\n', output.getvalue())
-        mock_exit.assert_called_with(1)
+    def test_ask(self, monkeypatch: pytest.MonkeyPatch, output: TextIOWrapper):
+        monkeypatch.setattr("builtins.input", Mock(return_value="hello"))
 
-    @patch("streamlink_cli.console.sys.exit")
-    def test_exit(self, mock_exit: Mock):
-        output = StringIO()
         console = ConsoleOutput(output)
-        console.exit("error")
-        self.assertEqual("error: error\n", output.getvalue())
-        mock_exit.assert_called_with(1)
+        assert console.ask("test: ") == "hello"
+        assert getvalue(output) == "test: "
 
-    @patch("streamlink_cli.console.sys.exit")
-    def test_exit_json(self, mock_exit: Mock):
-        output = StringIO()
-        console = ConsoleOutput(output, json=True)
-        console.exit("error")
-        self.assertEqual('{\n  "error": "error"\n}\n', output.getvalue())
-        mock_exit.assert_called_with(1)
+    def test_ask_no_tty(self, monkeypatch: pytest.MonkeyPatch, output: TextIOWrapper):
+        mock_input = Mock()
+        monkeypatch.setattr("builtins.input", mock_input)
 
-    @patch("streamlink_cli.console.input", Mock(return_value="hello"))
-    @patch("streamlink_cli.console.sys.stdin.isatty", Mock(return_value=True))
-    def test_ask(self):
-        output = StringIO()
         console = ConsoleOutput(output)
-        self.assertEqual("hello", console.ask("test: "))
-        self.assertEqual("test: ", output.getvalue())
+        assert console.ask("test: ") is None
+        assert getvalue(output) == ""
+        assert mock_input.call_args_list == []
 
-    @patch("streamlink_cli.console.input")
-    @patch("streamlink_cli.console.sys.stdin.isatty", Mock(return_value=False))
-    def test_ask_no_tty(self, mock_input: Mock):
-        output = StringIO()
+    def test_ask_no_stdin(self, monkeypatch: pytest.MonkeyPatch, output: TextIOWrapper):
+        monkeypatch.setattr("sys.stdin", None)
+
         console = ConsoleOutput(output)
-        self.assertIsNone(console.ask("test: "))
-        self.assertEqual("", output.getvalue())
-        mock_input.assert_not_called()
+        assert console.ask("test: ") is None
+        assert getvalue(output) == ""
 
-    @patch("streamlink_cli.console.input", Mock(side_effect=ValueError))
-    @patch("streamlink_cli.console.sys.stdin.isatty", Mock(return_value=True))
-    def test_ask_input_exception(self):
-        output = StringIO()
+    def test_ask_input_exception(self, monkeypatch: pytest.MonkeyPatch, output: TextIOWrapper):
+        monkeypatch.setattr("builtins.input", Mock(side_effect=ValueError))
+
         console = ConsoleOutput(output)
-        self.assertIsNone(console.ask("test: "))
-        self.assertEqual("test: ", output.getvalue())
+        assert console.ask("test: ") is None
+        assert getvalue(output) == "test: "
 
-    @patch("streamlink_cli.console.getpass")
-    @patch("streamlink_cli.console.sys.stdin.isatty", Mock(return_value=True))
-    def test_askpass(self, mock_getpass: Mock):
+    def test_askpass(self, monkeypatch: pytest.MonkeyPatch, output: TextIOWrapper):
         def getpass(prompt, stream):
             stream.write(prompt)
             return "hello"
 
-        output = StringIO()
-        console = ConsoleOutput(output)
-        mock_getpass.side_effect = getpass
-        self.assertEqual("hello", console.askpass("test: "))
-        self.assertEqual("test: ", output.getvalue())
+        monkeypatch.setattr("streamlink_cli.console.getpass", getpass)
 
-    @patch("streamlink_cli.console.sys.stdin.isatty", Mock(return_value=False))
-    def test_askpass_no_tty(self):
-        output = StringIO()
         console = ConsoleOutput(output)
-        self.assertIsNone(console.askpass("test: "))
+        assert console.askpass("test: ") == "hello"
+        assert getvalue(output) == "test: "
+
+    def test_askpass_no_tty(self, output: TextIOWrapper):
+        console = ConsoleOutput(output)
+        assert console.askpass("test: ") is None
+        assert getvalue(output) == ""
+
+    def test_askpass_no_stdin(self, monkeypatch: pytest.MonkeyPatch, output: TextIOWrapper):
+        monkeypatch.setattr("sys.stdin", None)
+
+        console = ConsoleOutput(output)
+        assert console.askpass("test: ") is None
+        assert getvalue(output) == ""

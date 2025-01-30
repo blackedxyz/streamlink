@@ -14,12 +14,13 @@ from streamlink.stream.hls import HLSStream
 from streamlink.utils.parse import parse_qsd
 from streamlink.utils.url import update_qsd
 
+
 log = logging.getLogger(__name__)
 
 
-@pluginmatcher(re.compile(
-    r"https?://(?:www\.)?mitele\.es/directo/(?P<channel>[\w-]+)"
-))
+@pluginmatcher(
+    re.compile(r"https?://(?:www\.)?mitele\.es/directo/(?P<channel>[\w-]+)"),
+)
 class Mitele(Plugin):
     URL_CARONTE = "https://caronte.mediaset.es/delivery/channel/mmc/{channel}/mtweb"
     URL_GBX = "https://mab.mediaset.es/1.0.0/get"
@@ -42,19 +43,21 @@ class Mitele(Plugin):
                         "cerbero": validate.url(),
                         "bbx": str,
                         "dls": validate.all(
-                            [{
-                                "drm": bool,
-                                "format": str,
-                                "stream": validate.all(
-                                    validate.transform(str.strip),
-                                    validate.url(),
-                                ),
-                                "lid": validate.all(
-                                    int,
-                                    validate.transform(str),
-                                ),
-                                validate.optional("assetKey"): str,
-                            }],
+                            [
+                                {
+                                    "drm": bool,
+                                    "format": str,
+                                    "stream": validate.all(
+                                        validate.transform(str.strip),
+                                        validate.url(),
+                                    ),
+                                    "lid": validate.all(
+                                        int,
+                                        validate.transform(str),
+                                    ),
+                                    validate.optional("assetKey"): str,
+                                },
+                            ],
                             validate.filter(lambda obj: obj["format"] == "hls"),
                         ),
                     },
@@ -69,7 +72,7 @@ class Mitele(Plugin):
             self.URL_GBX,
             params={
                 "oid": "mtmw",
-                "eid": f"/api/mtmw/v2/gbx/mtweb/live/mmc/{channel}",
+                "eid": f"/api/mtmw/v3/gbx/mtweb/{channel}",
             },
             schema=validate.Schema(
                 validate.parse_json(),
@@ -108,11 +111,18 @@ class Mitele(Plugin):
                 log.warning("Stream may be protected by DRM")
                 continue
             cdn_token = tokens.get(stream["lid"], {}).get("cdn", "")
+            if not cdn_token:
+                continue
             qsd = parse_qsd(cdn_token)
             urls.add(update_qsd(stream["stream"], qsd, quote_via=lambda string, *_, **__: string))
 
         for url in urls:
-            yield from HLSStream.parse_variant_playlist(self.session, url, name_fmt="{pixels}_{bitrate}").items()
+            yield from HLSStream.parse_variant_playlist(
+                self.session,
+                url,
+                headers={"Origin": "https://www.mitele.es"},
+                name_fmt="{pixels}_{bitrate}",
+            ).items()
 
 
 __plugin__ = Mitele

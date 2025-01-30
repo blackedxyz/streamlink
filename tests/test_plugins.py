@@ -9,8 +9,7 @@ import pytest
 import streamlink.plugins
 import tests.plugins
 from streamlink.plugin.plugin import Matcher, Plugin
-from streamlink.utils.module import load_module
-from streamlink_cli.argparser import build_parser
+from streamlink.utils.module import exec_module
 
 
 plugins_path = streamlink.plugins.__path__[0]
@@ -25,17 +24,24 @@ plugintests_ignore = [
     "test_stream",
 ]
 
-plugins = [
-    pname
-    for finder, pname, ispkg in pkgutil.iter_modules([plugins_path])
-    if not pname.startswith("common_")
-]
+plugin_modules = [
+    module_info
+    for module_info in pkgutil.iter_modules([plugins_path])
+    if not module_info.name.startswith("common_")
+]  # fmt: skip
+plugins = [module_info.name for module_info in plugin_modules]
 plugins_no_protocols = [pname for pname in plugins if pname not in protocol_plugins]
 plugintests = [
     re.sub(r"^test_", "", tname)
     for finder, tname, ispkg in pkgutil.iter_modules([plugintests_path])
     if tname.startswith("test_") and tname not in plugintests_ignore
 ]
+
+PLUGIN_TYPES = "live", "vod", "live, vod"
+PLUGIN_METADATA = "id", "author", "category", "title"
+
+re_url = re.compile(r"^https?://")
+re_metadata = re.compile(rf"^({'|'.join(re.escape(item) for item in PLUGIN_METADATA)})(\s.+)?$")
 
 
 def unique(iterable):
@@ -47,17 +53,9 @@ def unique(iterable):
 
 
 class TestPlugins:
-    @pytest.fixture(scope="class", params=plugins)
+    @pytest.fixture(scope="class", params=plugin_modules)
     def plugin(self, request):
-        return load_module(f"streamlink.plugins.{request.param}", plugins_path)
-
-    @pytest.fixture(scope="class")
-    def parser(self):
-        return build_parser()
-
-    @pytest.fixture(scope="class")
-    def global_arg_dests(self, parser):
-        return [action.dest for action in parser._actions]
+        return exec_module(request.param.module_finder, f"streamlink.plugins.{request.param.name}")
 
     def test_exports_plugin(self, plugin):
         assert hasattr(plugin, "__plugin__"), "Plugin module exports __plugin__"
@@ -79,11 +77,12 @@ class TestPlugins:
                 ("args", Parameter.VAR_POSITIONAL),
                 ("kwargs", Parameter.VAR_KEYWORD),
             )
-        )
+        )  # fmt: skip
 
     def test_matchers(self, plugin):
         pluginclass = plugin.__plugin__
-        assert isinstance(pluginclass.matchers, list) and len(pluginclass.matchers) > 0, "Has at least one matcher"
+        assert isinstance(pluginclass.matchers, list), "Has at a matchers list"
+        assert len(pluginclass.matchers) > 0, "Has at least one matcher"
         assert all(isinstance(matcher, Matcher) for matcher in pluginclass.matchers), "Only has valid matchers"
 
     def test_plugin_api(self, plugin):
@@ -92,13 +91,9 @@ class TestPlugins:
         assert not hasattr(pluginclass, "priority"), "Does not implement deprecated priority(url)"
         assert callable(pluginclass._get_streams), "Implements _get_streams()"
 
-    def test_has_valid_global_args(self, global_arg_dests, plugin):
-        assert all(parg.dest in global_arg_dests for parg in plugin.__plugin__.arguments or [] if parg.is_global), \
-            "All plugin arguments with is_global=True are valid global arguments"
-
 
 class TestPluginTests:
-    @pytest.mark.parametrize("plugin", plugins_no_protocols)
+    @pytest.mark.parametrize("plugin", plugins)
     def test_plugin_has_tests(self, plugin):
         assert plugin in plugintests, "Test module exists for plugin"
 
@@ -114,6 +109,8 @@ class TestPluginMetadata:
             "description",
             "url",
             "type",
+            "webbrowser",
+            "metadata",
             "region",
             "account",
             "notes",
@@ -131,6 +128,8 @@ class TestPluginMetadata:
     def metadata_keys_repeat(self):
         return (
             "url",
+            "metadata",
+            "notes",
         )
 
     @pytest.fixture(scope="class")
@@ -139,13 +138,12 @@ class TestPluginMetadata:
             key
             for key in metadata_keys_all
             if key not in metadata_keys_repeat
-        )
+        )  # fmt: skip
 
     @pytest.fixture(scope="class", params=plugins_no_protocols)
     def tokeninfo(self, request):
-        with (Path(plugins_path) / f"{request.param}.py").open() as handle:
-            for tokeninfo in tokenize.generate_tokens(handle.readline):  # pragma: no branch
-                break
+        with (Path(plugins_path) / f"{request.param}.py").open(encoding="utf-8") as handle:
+            tokeninfo = next(tokenize.generate_tokens(handle.readline), None)
 
         assert type(tokeninfo) is tokenize.TokenInfo, "Parses the first token"
         assert tokeninfo.type == tokenize.STRING, "First token is a string"
@@ -160,7 +158,7 @@ class TestPluginMetadata:
         lines = [
             re.search(r"^\$(?P<key>\w+) (?P<value>\S.+)$", line)
             for line in match.group("metadata").split("\n")
-        ]
+        ]  # fmt: skip
         assert all(lines), "All lines are properly formatted using the '$key value' format"
 
         return [(match.group("key"), match.group("value")) for match in lines]
@@ -175,32 +173,39 @@ class TestPluginMetadata:
 
     def test_no_unknown(self, metadata_keys_all, metadata_keys):
         assert not any(True for key in metadata_keys if key not in metadata_keys_all), \
-            "No unknown metadata keys are set"
+            "No unknown metadata keys are set"  # fmt: skip
 
     def test_required(self, metadata_keys_required, metadata_keys):
         assert all(True for tag in metadata_keys_required if tag in metadata_keys), \
-            "All required metadata keys are set"
+            "All required metadata keys are set"  # fmt: skip
 
     def test_order(self, metadata_keys_all, metadata_keys):
         keys = tuple(key for key in metadata_keys_all if key in metadata_keys)
         assert keys == tuple(unique(metadata_keys)), \
-            "All metadata keys are defined in order"
+            "All metadata keys are defined in order"  # fmt: skip
         assert tuple(reversed(keys)) == tuple(unique(reversed(metadata_keys))), \
-            "All repeatable metadata keys are defined in order"
+            "All repeatable metadata keys are defined in order"  # fmt: skip
 
     def test_repeat(self, metadata_keys_repeat, metadata_keys, metadata_items):
         items = {key: tuple(v for k, v in metadata_items if k == key) for key in metadata_keys if key in metadata_keys_repeat}
         assert items == {key: tuple(unique(value)) for key, value in items.items()}, \
-            "Repeatable keys don't have any duplicates"
+            "Repeatable keys don't have any duplicates"  # fmt: skip
 
     def test_no_repeat(self, metadata_keys_no_repeat, metadata_keys):
         keys = tuple(key for key in metadata_keys if key in metadata_keys_no_repeat)
         assert keys == tuple(unique(keys)), "Non-repeatable keys are set at most only once"
 
     def test_key_url(self, metadata_items):
-        assert not any(re.match("^https?://", val) for key, val in metadata_items if key == "url"), \
-            "URL metadata values don't start with http:// or https://"
+        assert not any(re_url.match(val) for key, val in metadata_items if key == "url"), \
+            "$url metadata values don't start with http:// or https://"  # fmt: skip
 
     def test_key_type(self, metadata_dict):
-        assert metadata_dict.get("type") in ("live", "vod", "live, vod"), \
-            "Type metadata has the correct value"
+        assert metadata_dict.get("type") in PLUGIN_TYPES, \
+            "$type metadata has the correct value"  # fmt: skip
+
+    def test_key_metadata(self, metadata_items):
+        assert all(re_metadata.match(val) for key, val in metadata_items if key == "metadata"), \
+            "$metadata metadata values have the correct format"  # fmt: skip
+        indexes = [PLUGIN_METADATA.index(val.split(" ")[0]) for key, val in metadata_items if key == "metadata"]
+        assert [PLUGIN_METADATA[i] for i in indexes] == [PLUGIN_METADATA[i] for i in sorted(indexes)], \
+            "$metadata metadata values are ordered correctly"  # fmt: skip
